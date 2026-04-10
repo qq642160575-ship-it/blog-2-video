@@ -64,7 +64,7 @@ class Validation(BaseModel):
     narrative_continuity: str = Field(..., description="叙事连续性")
     emotion_curve_compliance: str = Field(..., description="情绪曲线符合度")
 
-class Result(BaseModel):
+class DirectorResult(BaseModel):
     # 🎬 完整分镜列表（按叙事顺序）
     scenes: List[Scene] = Field(
         ...,
@@ -78,6 +78,6 @@ director_agent = {
     "model": get_model('cc'),  # 语义理解与文学创作能力极强 (claude-3-5-sonnet)
     "system_prompt": PromptManager().get_system_prompt('director', example=example),
     "tools": None, # [text_segmenter, timing_calculator] placeholders
-    "response_format": Result
+    "response_format": DirectorResult
 }
 print(director_agent.get('system_prompt'))
