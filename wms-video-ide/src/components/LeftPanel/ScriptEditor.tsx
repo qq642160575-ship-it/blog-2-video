@@ -22,27 +22,29 @@ export const ScriptEditor: React.FC<ScriptEditorProps> = ({ isOpen, onToggle }) 
   const { charCount, estimatedSec, sceneDurationSec, isTooLong } = useScriptMetrics();
 
   return (
-    <div className="flex-shrink-0 border-t border-gray-700">
+    <div className="flex-shrink-0 border-t border-gray-700 bg-[#141416]">
       {/* 折叠标题栏 */}
       <button
         onClick={onToggle}
-        className="w-full flex items-center justify-between px-4 py-2.5 bg-[#1f1f23] hover:bg-[#27272a] transition-colors"
+        className="w-full flex items-center justify-between px-4 py-3 bg-[#1c1c1f] hover:bg-[#232326] transition-colors"
       >
         <div className="flex items-center gap-2">
-          <FileText className="w-3.5 h-3.5 text-green-400" />
-          <span className="text-xs font-semibold text-gray-200">Script Editor 文案</span>
-          <span className="text-[9px] bg-gray-700 text-gray-400 px-1.5 py-0.5 rounded">
-            {activeScene.componentType}
-          </span>
+          <span className="flex items-center justify-center w-5 h-5 rounded-full bg-orange-500/10 text-orange-400 text-[10px] font-bold">4</span>
+          <h3 className="text-xs text-gray-300 font-bold tracking-wide flex items-center gap-2">
+            当前分镜文案
+            <span className="text-[9px] bg-[#27272a] text-gray-300 px-1.5 py-0.5 rounded font-normal">
+              {activeScene.componentType}
+            </span>
+          </h3>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-3">
           {isTooLong && (
-            <span className="text-[9px] text-red-400 font-mono">⚠ 文案偏长</span>
+            <span className="text-[9px] text-red-500 font-mono tracking-wide px-1.5 py-0.5 bg-red-500/10 rounded">⚠ 文案偏长</span>
           )}
           {isOpen ? (
-            <ChevronDown className="w-3.5 h-3.5 text-gray-500" />
+            <ChevronDown className="w-4 h-4 text-gray-500" />
           ) : (
-            <ChevronUp className="w-3.5 h-3.5 text-gray-500" />
+            <ChevronUp className="w-4 h-4 text-gray-500" />
           )}
         </div>
       </button>

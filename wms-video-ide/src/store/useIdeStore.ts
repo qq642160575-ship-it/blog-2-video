@@ -12,6 +12,8 @@ export interface IdeState {
   activeSceneId: string;
   aiStatus: AiStatus;
   rewriteStatus: RewriteStatus;
+  processLogs: { time: string; content: string; details?: string }[];
+  processStartTime: number | null;
 
   // ── Actions ──
   setSourceText: (text: string) => void;
@@ -23,6 +25,9 @@ export interface IdeState {
   updateSceneDuration: (id: string, durationInFrames: number) => void;
   updateSceneMark: (sceneId: string, markKey: string, newFrame: number) => void;
   updateSceneScript: (id: string, newScript: string) => void;
+  addProcessLog: (content: string, details?: string) => void;
+  clearProcessLogs: () => void;
+  setProcessStartTime: (time: number | null) => void;
 }
 
 const MOCK_SCENES: Scene[] = [
@@ -423,12 +428,21 @@ export const useIdeStore = create<IdeState>((set) => ({
   activeSceneId: MOCK_SCENES[0].id,
   aiStatus: 'idle',
   rewriteStatus: 'idle',
+  processLogs: [],
+  processStartTime: null,
 
   setSourceText: (text) => set({ sourceText: text }),
   setOralScript: (text) => set({ oralScript: text }),
   setActiveScene: (id) => set({ activeSceneId: id }),
   setAiStatus: (status) => set({ aiStatus: status }),
   setRewriteStatus: (status) => set({ rewriteStatus: status }),
+  
+  addProcessLog: (content, details) => set((state) => {
+    const time = new Date().toLocaleTimeString('zh-CN', { hour12: false });
+    return { processLogs: [...state.processLogs, { time, content, details }] };
+  }),
+  clearProcessLogs: () => set({ processLogs: [], processStartTime: null }),
+  setProcessStartTime: (time) => set({ processStartTime: time }),
 
   updateSceneCode: (id, newCode) =>
     set((state) => ({

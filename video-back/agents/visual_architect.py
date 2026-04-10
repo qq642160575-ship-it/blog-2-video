@@ -4,50 +4,126 @@ from models.get_model import get_model
 from prompts.manager import PromptManager
 
 # 定义视觉组件协议
-class SceneComponent(BaseModel):
-    component_id: str = Field(..., description="唯一ID")
-    role: str = Field(..., description="组件在画面中的角色（如：'Subject', 'Background-Decoration', 'Annotation'）")
-    description: str = Field(..., description="详细的组件构造描述（如：'一个3层的垂直堆叠结构，顶层带红色闪烁，底层稳固'）")
-    visual_logic: str = Field(..., description="组件的视觉逻辑（如：'使用SVG绘制不规则锯齿边缘'、'利用Tailwind渐变模拟深度感'）")
-    depth_layer: int = Field(..., description="图层深度（0为背景，100为最顶层）")
-    animation_mark: str = Field(..., description="对应的 Marks 触发点")
+from pydantic import BaseModel
+from typing import Dict, List, Any, Optional
 
-# 定义视觉架构协议
+example = """
+1. 例: 概念转译
+        - Title: 数据流可视化
+        - Format type: JSON
+        - Description: 包含三个核心数据模块的布局规范，展示三角形数据流关系
+        - Example content: |
+            {
+              "theme_palette": {
+                "background": "#0F0F1A",
+                "primary_accent": "#00E5FF",
+                "secondary_accent": "#FF4D4D",
+                "text_main": "#C0C0C0",
+                "error": "#FF3B30"
+              },
+              "layout_blueprint": [
+                {
+                  "id": "dataTriangle",
+                  "type": "SVGGroup",
+                  "visual_weight": 3,
+                  "coordinates": {"x": 50, "y": 100, "width": 800, "height": 600},
+                  "animation": {"type": "spring", "stiffness": 200, "dampening": 30}
+                },
+                {
+                  "id": "codeWindow",
+                  "type": "Frame",
+                  "style": "border: 2px solid #00E5FF, borderRadius 12px, padding 24px",
+                  "coordinates": {"x": 100, "y": 300, "width": 600, "height": 400}
+                }
+              ],
+              "marks_definition": {
+                "initTriangle": 0,
+                "growNodes": 45,
+                "revealCode": 90,
+                "pulseError": 135
+              },
+              "animation_formulas": "dataTriangle采用spring缩放动画，codeWindow使用interpolate的opacity渐变，error模块触发脉冲式闪烁效果（frames 135-150）"
+            }
+  
+     2. 例: 动态模块设计
+        - Title: 交互式错误提示
+        - Format type: JSON
+        - Description: 包含状态切换与动画触发的完整模块定义
+        - Example content: |
+            {
+              "theme_palette": {
+                "alert": "#FF3B30",
+                "text_main": "#FFFFFF",
+                "highlight": "#00E5FF"
+              },
+              "layout_blueprint": [
+                {
+                  "id": "errorPopup",
+                  "type": "Modal",
+                  "visual_weight": 5,
+                  "coordinates": {"x": 0, "y": 0, "width": 100, "height": 100},
+                  "animation": {"type": "interpolate", "duration": 500}
+                }
+              ],
+              "marks_definition": {
+                "showAlert": 0,
+                "expandBox": 120,
+                "fadeOut": 300
+              },
+              "animation_formulas": "errorPopup在第0帧弹出（scale:0.3->1.0），第120帧触发expandBox动画（height:100->200），第300帧执行fadeOut操作（opacity:1->0）"
+            }
+
+"""
+
+class ThemePalette(BaseModel):
+    background: str
+    primary_accent: str
+    secondary_accent: str
+    text_main: str
+    text_muted: str
+    highlight: str
+    warning: str
+    error: str
+    glass_panel: Optional[str] = None
+    stroke: Optional[str] = None
+
+
+class LayoutBlueprintItem(BaseModel):
+    id: str
+    type: str
+    position: Dict[str, Any]   # x, y, align
+    size: Dict[str, Any]       # width, height
+    style: Dict[str, Any]
+    animation: Optional[Dict[str, Any]] = None
+    svg_spec: Optional[Dict[str, Any]] = None
+    content_binding: Optional[str] = None
+
+
+class MarksDefinition(BaseModel):
+    __root__: Dict[str, int]
+
+
+class AnimationFormulas(BaseModel):
+    content: str
+
+
 class VisualProtocol(BaseModel):
-    composition_metaphor: str = Field(..., description="视觉组成的深层联系（如：'支柱与地基'、'扩散的波纹'）")
-    safe_zones: List[str] = Field(..., description="标明哪些区域禁止放置元素以防遮挡（如：'Bottom-20% for Subtitles'）")
-    marks: Dict[str, int] = Field(..., description="关键节奏锚点")
-    components: List[SceneComponent] = Field(..., description="视觉组件列表")
+    """
+    视频视觉动效架构协议（Visual Protocol）
+    用于将导演分镜 → 前端可渲染UI系统
+    """
 
-example_json = {
-    "composition_metaphor": "Industrial machinery and logical flow",
-    "safe_zones": ["Bottom-25% for script subtitles", "Margins-5% for bleed"],
-    "marks": {"engineStart": 30, "processFlow": 70, "outputComplete": 120},
-    "components": [
-      {
-          "component_id": "core_engine",
-          "role": "Subject",
-          "description": "A complex 3D-effect cylinder representing the WMS Core, with rotating internal rings",
-          "visual_logic": "Use SVG for concentric circles, apply CSS rotate animation with frame-based interpolation for the rings",
-          "depth_layer": 50,
-          "animation_mark": "engineStart"
-      },
-      {
-          "component_id": "data_packets",
-          "role": "Annotation",
-          "description": "Stream of square packets flowing from top-left into the core_engine",
-          "visual_logic": "Render a list of 5 squares; use interpolate to move them along a curved path using cubic-bezier logic",
-          "depth_layer": 30,
-          "animation_mark": "processFlow"
-      }
-    ]
-}
+    theme_palette: ThemePalette
+    layout_blueprint: List[LayoutBlueprintItem]
+    marks_definition: Dict[str, int]
+    animation_formulas: str
+
 
 visual_architect_agent = {
     "name": "visual-architect",
     "description": "负责定义分镜的 UI 布局、交互逻辑和关键帧锚点(Marks)",
     "model": get_model('cc'),  # 逻辑严密，对结构化 JSON 的遵循度高 (gpt-4o)
-    "system_prompt": PromptManager().get_system_prompt('visual_architect', example=str(example_json)),
+    "system_prompt": PromptManager().get_system_prompt('visual_architect', example=example),
     "tools": None, # [ui_pattern_matcher, keyframe_planner] placeholders
     "response_format": VisualProtocol
 }
