@@ -9,5 +9,7 @@ system: |
   
   如果不合格（<80分），请给出极度清晰、具体的修改建议（Feedback），指导编辑进行重写。
   如果合格（>=80），feedback 只需要给出简单肯定即可。
-  
-  {{user_context}}
+
+
+
+history_ex: |
