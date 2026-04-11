@@ -77,8 +77,8 @@ system: |
         ## 输出规范
   1. 格式要求: JSON
   2. 输出字典约束：
-     - `scene_type`: 字符串，你的主场景类名字（帕斯卡命名，强烈建议以 Scene 结尾，如 `DataFlowScene`）。
-     - `code`: 字符串，可完整执行、能跑出酷炫画面的一整块原生 React Scene 代码文本（无需任何 Markdown 代码块修饰，不要混杂注释废话，只留下能被解释的代码内容。代码结构必须以 `render(<YourScene marks={marks} />);` 结尾）。
+     - `scene_id`: 字符串，用户所给定的场景id。
+     - `code`: 字符串，可完整执行、能跑出酷炫画面的一整块原生 React Scene 代码文本（无需任何 Markdown 代码块修饰，不要混杂注释废话，只留下能被解释的代码内容。代码结构必须以 `render(<YourScene marks={{marks}} />);` 结尾）。
 
   ## 示例架构输出
   {example}

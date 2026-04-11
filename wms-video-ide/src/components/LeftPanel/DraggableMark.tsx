@@ -9,19 +9,11 @@ interface DraggableMarkProps {
   onMarkChange: (sceneId: string, markKey: string, newFrame: number) => void;
 }
 
-/**
- * 可拖拽锚点组件。
- *
- * 修正点：
- * 1. 从 App.tsx 独立出来，不再内联定义
- * 2. 本地 draftFrame 在拖拽期间先行更新，pointerup 时才提交 store → 消除拖拽期间的 store 风暴
- * 3. pointermove 用 requestAnimationFrame 节流，防止 60fps 高频触发
- */
 export const DraggableMark: React.FC<DraggableMarkProps> = React.memo(
   ({ sceneId, markKey, frame, totalFrames, onMarkChange }) => {
     const [isDragging, setIsDragging] = useState(false);
-    // 拖拽期间的本地帧值，不直接写 store
     const [draftFrame, setDraftFrame] = useState<number | null>(null);
+    const draftFrameRef = React.useRef<number | null>(null);
 
     const displayFrame = draftFrame !== null ? draftFrame : frame;
     const percentage = Math.min(100, Math.max(0, (displayFrame / totalFrames) * 100));
@@ -32,25 +24,21 @@ export const DraggableMark: React.FC<DraggableMarkProps> = React.memo(
         e.stopPropagation();
         setIsDragging(true);
         setDraftFrame(frame);
+        draftFrameRef.current = frame;
 
-        const track = (e.currentTarget as HTMLElement).closest(
-          '.rhythm-track'
-        ) as HTMLDivElement;
-
+        const track = (e.currentTarget as HTMLElement).closest('.rhythm-track') as HTMLDivElement;
         let rafId: number | null = null;
 
         const onPointerMove = (moveEvent: PointerEvent) => {
-          if (!track) return;
-          // RAF 节流：跳过本帧已有的调度
-          if (rafId !== null) return;
+          if (!track || rafId !== null) return;
           rafId = requestAnimationFrame(() => {
             rafId = null;
             const rect = track.getBoundingClientRect();
             let newX = moveEvent.clientX - rect.left;
             newX = Math.max(0, Math.min(newX, rect.width));
             const newFrame = Math.round((newX / rect.width) * totalFrames);
-            // 仅更新本地 draft，不触发 store
             setDraftFrame(newFrame);
+            draftFrameRef.current = newFrame;
           });
         };
 
@@ -60,13 +48,11 @@ export const DraggableMark: React.FC<DraggableMarkProps> = React.memo(
             cancelAnimationFrame(rafId);
             rafId = null;
           }
-          // pointerup 时才提交最终值到 store
-          setDraftFrame((latest) => {
-            if (latest !== null) {
-              onMarkChange(sceneId, markKey, latest);
-            }
-            return null;
-          });
+          if (draftFrameRef.current !== null) {
+            onMarkChange(sceneId, markKey, draftFrameRef.current);
+          }
+          setDraftFrame(null);
+          draftFrameRef.current = null;
           window.removeEventListener('pointermove', onPointerMove);
           window.removeEventListener('pointerup', onPointerUp);
         };
@@ -85,26 +71,31 @@ export const DraggableMark: React.FC<DraggableMarkProps> = React.memo(
           transform: 'translateX(-50%)',
           zIndex: isDragging ? 50 : 10,
           cursor: 'ew-resize',
+          paddingLeft: '18px',
+          paddingRight: '18px',
+          marginLeft: '-18px',
         }}
         onPointerDown={handlePointerDown}
       >
         <div
-          className={`w-1 h-full transition-colors ${
-            isDragging ? 'bg-blue-400' : 'bg-blue-500/60 group-hover/mark:bg-blue-400'
+          className={`w-0.5 h-full transition-colors ${
+            isDragging ? 'bg-blue-400' : 'bg-blue-500/70 group-hover/mark:bg-blue-400'
           }`}
         />
         <div className="absolute -top-1 pointer-events-none">
           <MapPin
-            className={`w-3.5 h-3.5 transition-all ${
+            className={`w-4 h-4 transition-all ${
               isDragging
                 ? 'text-blue-200 fill-blue-500 scale-125'
-                : 'text-blue-400 fill-blue-900'
+                : 'text-blue-400 fill-blue-900 group-hover/mark:scale-110 group-hover/mark:text-blue-300'
             }`}
           />
         </div>
         <span
-          className={`absolute bottom-full mb-1 left-1/2 -translate-x-1/2 text-[9px] font-mono text-blue-200 bg-blue-900 px-1.5 py-0.5 rounded whitespace-nowrap pointer-events-none transition-opacity ${
-            isDragging ? 'opacity-100' : 'opacity-0 group-hover/mark:opacity-100'
+          className={`absolute bottom-full mb-1 left-1/2 -translate-x-1/2 text-[10px] font-mono whitespace-nowrap pointer-events-none transition-all ${
+            isDragging
+              ? 'text-blue-100 bg-blue-700 px-1.5 py-0.5 rounded opacity-100 shadow-lg'
+              : 'text-blue-400 opacity-60 group-hover/mark:opacity-100 group-hover/mark:text-blue-200 group-hover/mark:bg-blue-900/80 group-hover/mark:px-1.5 group-hover/mark:py-0.5 group-hover/mark:rounded'
           }`}
         >
           {markKey} {(displayFrame / 30).toFixed(1)}s

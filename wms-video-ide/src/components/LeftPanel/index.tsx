@@ -13,7 +13,7 @@ export const LeftPanel: React.FC = () => {
   const [scriptPanelOpen, setScriptPanelOpen] = useState(true);
 
   return (
-    <div className="w-[25%] border-r border-gray-800 flex flex-col bg-[#18181b] min-h-0">
+    <div className="w-[28%] border-r border-gray-800 flex flex-col bg-[#18181b] min-h-0">
       {/* 顶部 Logo */}
       <div className="p-4 border-b border-gray-800 flex items-center gap-2 flex-shrink-0">
         <Sparkles className="w-5 h-5 text-purple-500" />
