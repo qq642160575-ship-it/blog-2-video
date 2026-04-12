@@ -1,4 +1,4 @@
-import React, { useRef, useMemo } from 'react';
+import React, { useMemo, useRef } from 'react';
 import { Player } from '@remotion/player';
 import type { PlayerRef } from '@remotion/player';
 import { PlaySquare } from 'lucide-react';
@@ -12,39 +12,36 @@ export const PreviewPlayer: React.FC = () => {
   const scenes = useIdeStore((s) => s.scenes);
   const activeSceneId = useIdeStore((s) => s.activeSceneId);
   const totalFrames = useIdeStore(selectTotalFrames);
-  const aiStatus = useIdeStore((s) => s.aiStatus);
   const inputProps = useMemo(() => ({ scenes }), [scenes]);
   const hasScenes = scenes.length > 0;
 
   usePlayerControl(playerRef, scenes, activeSceneId);
 
   return (
-    <div className="w-[30%] flex flex-col border-r border-gray-800 bg-black">
-      <div className="px-3 py-2.5 border-b border-gray-800 flex items-center justify-between bg-[#18181b] flex-shrink-0">
+    <div className="flex w-[28%] flex-col border-r border-gray-800 bg-black">
+      <div className="flex flex-shrink-0 items-center justify-between border-b border-gray-800 bg-[#18181b] px-3 py-2.5">
         <div className="flex items-center gap-2 text-xs text-gray-400">
-          <PlaySquare className="w-3.5 h-3.5 text-green-400" />
-          <span className="font-semibold text-[12px]">预览</span>
+          <PlaySquare className="h-3.5 w-3.5 text-emerald-400" />
+          <span className="text-[12px] font-semibold">预览</span>
         </div>
-        <div className="text-[11px] px-2 py-0.5 bg-gray-800/60 rounded text-gray-500 font-mono">
-          {hasScenes ? `${(totalFrames / 30).toFixed(1)}s` : '未生成'}
+        <div className="rounded bg-gray-800/60 px-2 py-0.5 font-mono text-[11px] text-gray-500">
+          {hasScenes ? `${(totalFrames / 30).toFixed(1)}s` : '等待生成'}
         </div>
       </div>
 
-      <div className="flex-1 flex items-center justify-center p-3 overflow-hidden">
+      <div className="flex flex-1 items-center justify-center overflow-hidden p-3">
         {!hasScenes ? (
-          <div className="w-full h-full rounded-lg border border-dashed border-gray-800 bg-[#0f0f12] flex items-center justify-center p-6">
-            <div className="max-w-[220px] text-center">
-              <p className="text-sm text-gray-300">
-                {aiStatus === 'generating' ? '正在准备预览内容...' : '预览将在生成分镜后显示'}
-              </p>
+          <div className="flex h-full w-full items-center justify-center rounded-lg border border-dashed border-gray-800 bg-[#0f0f12] p-6">
+            <div className="max-w-[240px] text-center">
+              <p className="text-sm text-gray-300">完成步骤 2 后，这里会显示视频预览。</p>
               <p className="mt-2 text-[12px] text-gray-500">
-                为了减少干扰，未开始前这里不会自动播放示例内容。
+                选择左侧镜头时，播放器会自动跳转到对应位置。
               </p>
             </div>
           </div>
         ) : (
           <div
-            className="relative shadow-2xl shadow-purple-900/20 border border-gray-800 rounded-lg overflow-hidden"
+            className="relative overflow-hidden rounded-lg border border-gray-800 shadow-2xl shadow-violet-900/20"
             style={{ width: '100%', aspectRatio: '1080/1920', maxHeight: 'calc(100% - 48px)' }}
           >
             <Player
@@ -62,8 +59,8 @@ export const PreviewPlayer: React.FC = () => {
         )}
       </div>
 
-      <div className="px-3 py-1 border-t border-gray-800/60 flex items-center justify-end bg-[#0e0e11]">
-        <span className="text-[10px] text-gray-700 font-mono tracking-wide">Remotion · 30fps</span>
+      <div className="flex items-center justify-end border-t border-gray-800/60 bg-[#0e0e11] px-3 py-1">
+        <span className="font-mono text-[10px] tracking-wide text-gray-700">Remotion · 30fps</span>
       </div>
     </div>
   );

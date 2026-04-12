@@ -1,8 +1,25 @@
 import os
+import re
 import yaml
 from typing import Dict, Any, Optional
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+
+class _SafeFormatDict(dict):
+    def __missing__(self, key: str) -> str:
+        return "{" + key + "}"
+
+
+def _safe_format_template(template: str, **kwargs: Any) -> str:
+    if not template:
+        return ""
+    try:
+        return template.format_map(_SafeFormatDict(kwargs))
+    except ValueError:
+        safe_template = re.sub(r"\{(?![A-Za-z_][A-Za-z0-9_]*\})", "{{", template)
+        safe_template = re.sub(r"(?<!\{)\}", "}}", safe_template)
+        return safe_template.format_map(_SafeFormatDict(kwargs))
 
 class PromptManager:
     """
@@ -36,8 +53,8 @@ class PromptManager:
         user_tmpl = prompt_config.get("user", "")
 
         # 格式化变量
-        system_prompt = system_tmpl.format(**kwargs) if system_tmpl else ""
-        user_prompt = user_tmpl.format(**kwargs) if user_tmpl else ""
+        system_prompt = _safe_format_template(system_tmpl, **kwargs)
+        user_prompt = _safe_format_template(user_tmpl, **kwargs)
 
         return {
             "system": system_prompt,

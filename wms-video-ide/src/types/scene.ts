@@ -3,6 +3,7 @@ export interface Scene {
   durationInFrames: number;
   componentType: string;
   script: string;
+  visual_design: string;
   code: string;
   marks: Record<string, number>;
 }

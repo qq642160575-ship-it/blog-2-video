@@ -1,6 +1,29 @@
 import React, { useState } from 'react';
-import { Loader2, Sparkles, Video, ChevronDown, ChevronUp, CheckCircle2 } from 'lucide-react';
+import {
+  CheckCircle2,
+  ChevronDown,
+  ChevronUp,
+  Loader2,
+  Sparkles,
+  Video,
+} from 'lucide-react';
 import { useIdeStore } from '../../store/useIdeStore';
+import { getNodePresentation } from '../../utils/workflowUi';
+import type { WorkflowName } from '../../types/workflow';
+
+type ServerProgress = {
+  status?: 'idle' | 'running' | 'success' | 'error';
+  node_key?: string | null;
+  node_label?: string;
+  description?: string;
+  completed_count?: number;
+  total_count?: number;
+  percent?: number;
+  elapsed_seconds?: number;
+  eta_seconds?: number | null;
+  estimated_total_seconds?: number | null;
+  detail?: Record<string, unknown>;
+};
 
 type SsePayload = {
   type: string;
@@ -8,6 +31,8 @@ type SsePayload = {
   data?: Record<string, any>;
   thread_id?: string;
   checkpoint_id?: string | null;
+  workflow?: WorkflowName;
+  progress?: ServerProgress;
 };
 
 export const SourceInput: React.FC = () => {
@@ -28,6 +53,10 @@ export const SourceInput: React.FC = () => {
   const animationThreadId = useIdeStore((s) => s.animationThreadId);
   const setScriptThreadContext = useIdeStore((s) => s.setScriptThreadContext);
   const setAnimationThreadContext = useIdeStore((s) => s.setAnimationThreadContext);
+  const setWorkflowProgress = useIdeStore((s) => s.setWorkflowProgress);
+  const resetWorkflowProgress = useIdeStore((s) => s.resetWorkflowProgress);
+  const captureScriptBaseline = useIdeStore((s) => s.captureScriptBaseline);
+  const captureAnimationBaseline = useIdeStore((s) => s.captureAnimationBaseline);
 
   const [step1Open, setStep1Open] = useState(true);
   const [step2Open, setStep2Open] = useState(true);
@@ -35,7 +64,7 @@ export const SourceInput: React.FC = () => {
   const isGeneratingVideo = aiStatus === 'generating';
   const isRewriting = rewriteStatus === 'generating';
   const sourceSummary = `${sourceText.trim().replace(/\s+/g, '').length} 字`;
-  const oralSummary = oralScript
+  const oralSummary = oralScript.trim()
     ? `${oralScript.trim().replace(/\s+/g, '').length} 字`
     : '未生成';
 
@@ -47,7 +76,7 @@ export const SourceInput: React.FC = () => {
     const decoder = new TextDecoder('utf-8');
 
     if (!reader) {
-      throw new Error('流式读取器初始化失败');
+      throw new Error('无法初始化流式读取器');
     }
 
     let buffer = '';
@@ -67,19 +96,47 @@ export const SourceInput: React.FC = () => {
 
         try {
           onPayload(JSON.parse(dataStr));
-        } catch (e) {
-          console.warn('解析 SSE 数据失败:', dataStr, e);
+        } catch (error) {
+          console.warn('解析 SSE 数据失败:', dataStr, error);
         }
       }
     }
+  };
+
+  const applyServerProgress = (workflow: WorkflowName, progress?: ServerProgress) => {
+    if (!progress) return;
+    const fallback = getNodePresentation(workflow, progress.node_key ?? null);
+
+    setWorkflowProgress(workflow, {
+      status: progress.status ?? 'running',
+      nodeKey: progress.node_key ?? null,
+      nodeLabel: progress.node_label || fallback.label,
+      description: progress.description || fallback.description,
+      completedCount: progress.completed_count ?? 0,
+      totalCount: progress.total_count ?? (workflow === 'animation' ? 3 : 2),
+      percent: progress.percent ?? 0,
+      elapsedSeconds: progress.elapsed_seconds ?? 0,
+      etaSeconds: progress.eta_seconds ?? null,
+      estimatedTotalSeconds: progress.estimated_total_seconds ?? null,
+      detail: progress.detail ?? {},
+      lastError: progress.status === 'error' ? progress.description ?? null : null,
+    });
   };
 
   const handleRewrite = async () => {
     setRewriteStatus('generating');
     setAiStatus('idle');
     clearProcessLogs();
+    resetWorkflowProgress('conversational_tone');
     setProcessStartTime(Date.now());
-    addProcessLog('正在连接服务，开始生成口语稿...');
+    setWorkflowProgress('conversational_tone', {
+      status: 'running',
+      nodeLabel: '正在生成口播脚本',
+      description: '系统会先改写口播稿，再评估质量。',
+      lastError: null,
+      completedCount: 0,
+    });
+    addProcessLog('开始生成口播稿。');
 
     try {
       const response = await fetch('/api/generate_script_sse', {
@@ -100,48 +157,93 @@ export const SourceInput: React.FC = () => {
           setScriptThreadContext(payload.thread_id, payload.checkpoint_id ?? undefined);
         }
 
-        if (payload.type === 'setup' || payload.type === 'end') {
-          if (payload.type === 'end' && payload.checkpoint_id) {
+        if (payload.progress) {
+          applyServerProgress('conversational_tone', payload.progress);
+        }
+
+        if (payload.type === 'progress') {
+          return;
+        }
+
+        if (payload.type === 'setup') {
+          setWorkflowProgress('conversational_tone', {
+            status: 'running',
+            nodeLabel: '正在生成口播脚本',
+            description: '已连接到口播脚本生成任务。',
+            lastError: null,
+          });
+          addProcessLog('已连接口播稿工作流。');
+          return;
+        }
+
+        if (payload.type === 'end') {
+          if (payload.checkpoint_id) {
             setScriptThreadContext(payload.thread_id ?? scriptThreadId, payload.checkpoint_id);
           }
-          addProcessLog(
-            payload.type === 'setup' ? '已建立口语稿工作流会话' : '口语稿工作流结束'
-          );
+          setWorkflowProgress('conversational_tone', {
+            status: 'success',
+            description: '口播脚本生成完成，可以继续进入分镜阶段。',
+            lastError: null,
+          });
+          addProcessLog('口播稿工作流结束。');
           return;
         }
 
         if (payload.type === 'error') {
-          throw new Error(payload.message || '口语稿生成失败');
+          setWorkflowProgress('conversational_tone', {
+            status: 'error',
+            description: '口播脚本生成失败，请检查网络或稍后重试。',
+            lastError: payload.message || '口播脚本生成失败',
+          });
+          throw new Error(payload.message || '口播稿生成失败');
         }
 
         if (payload.type === 'updates' && payload.data) {
-          const updateData = payload.data;
+          let updateData = payload.data;
+          if (updateData.type === 'updates' && updateData.data) {
+            updateData = updateData.data;
+          }
+
           const nodeName = Object.keys(updateData)[0];
           const nodeData = updateData[nodeName];
           if (!nodeName || !nodeData) return;
+          const presentation = getNodePresentation('conversational_tone', nodeName);
+          setWorkflowProgress('conversational_tone', {
+            nodeKey: nodeName,
+            nodeLabel: presentation.label,
+            description: presentation.description,
+            status: 'running',
+            lastError: null,
+          });
 
-          addProcessLog(`[节点运行] ${nodeName} 处理完成`);
+          addProcessLog(`节点完成：${nodeName}`);
 
           if (nodeData.current_script) {
             setOralScript(nodeData.current_script);
-            addProcessLog('[输出] 最新口语稿已生成', nodeData.current_script);
+            addProcessLog('已收到最新口播稿。', nodeData.current_script);
           }
 
           if (nodeData.review_score !== undefined) {
             addProcessLog(
-              `[评估] 当前得分 ${nodeData.review_score}`,
+              `评审得分：${nodeData.review_score}`,
               nodeData.last_feedback || undefined
             );
           }
         }
       });
 
-      addProcessLog('口语稿生成完成');
+      addProcessLog('口播稿生成完成。');
       setRewriteStatus('success');
+      captureScriptBaseline();
       setProcessStartTime(null);
-    } catch (err) {
-      console.error('口语稿生成失败:', err);
-      addProcessLog(`生成出错: ${(err as Error).message}`);
+    } catch (error) {
+      setWorkflowProgress('conversational_tone', {
+        status: 'error',
+        description: '口播脚本生成失败，请检查网络或稍后重试。',
+        lastError: (error as Error).message,
+      });
+      console.error('口播稿生成失败:', error);
+      addProcessLog(`口播稿生成失败：${(error as Error).message}`);
       setRewriteStatus('error');
       setProcessStartTime(null);
     }
@@ -151,8 +253,16 @@ export const SourceInput: React.FC = () => {
     setAiStatus('generating');
     setRewriteStatus('idle');
     clearProcessLogs();
+    resetWorkflowProgress('animation');
     setProcessStartTime(Date.now());
-    addProcessLog('启动多智能体视频生成流程...');
+    setWorkflowProgress('animation', {
+      status: 'running',
+      nodeLabel: '正在生成分镜',
+      description: '系统会先拆镜头，再补视觉方案，最后生成代码。',
+      lastError: null,
+      completedCount: 0,
+    });
+    addProcessLog('开始生成分镜、预览和代码。');
 
     try {
       const response = await fetch('/api/generate_animation_sse', {
@@ -173,16 +283,27 @@ export const SourceInput: React.FC = () => {
           setAnimationThreadContext(payload.thread_id, payload.checkpoint_id ?? undefined);
         }
 
-        if (payload.type === 'setup' || payload.type === 'end') {
-          if (payload.type === 'end' && payload.checkpoint_id) {
+        if (payload.progress) {
+          applyServerProgress('animation', payload.progress);
+        }
+
+        if (payload.type === 'progress') {
+          return;
+        }
+
+        if (payload.type === 'setup') {
+          addProcessLog('已连接视频工作流。');
+          return;
+        }
+
+        if (payload.type === 'end') {
+          if (payload.checkpoint_id) {
             setAnimationThreadContext(
               payload.thread_id ?? animationThreadId,
               payload.checkpoint_id
             );
           }
-          addProcessLog(
-            payload.type === 'setup' ? '已建立视频工作流会话' : '视频工作流结束'
-          );
+          addProcessLog('视频工作流结束。');
           return;
         }
 
@@ -200,27 +321,28 @@ export const SourceInput: React.FC = () => {
           const nodeData = updateData[nodeName];
           if (!nodeName || !nodeData) return;
 
-          addProcessLog(`[视频流程] ${nodeName} 步骤完成`);
+          addProcessLog(`节点完成：${nodeName}`);
 
           if (nodeName === 'director_node' && nodeData.director?.scenes) {
             const parsedScenes = nodeData.director.scenes.map((scene: any) => ({
               id: scene.scene_id,
-              durationInFrames: 150,
+              durationInFrames: Math.ceil((scene.duration || 5) * 30),
               componentType: scene.scene_id.replace(/\s+/g, ''),
               script: scene.script,
+              visual_design: scene.visual_design,
               marks: scene.animation_marks || {},
               code:
-                '// 正在等待 Coder Agent 生成代码...\n// 视觉设计要求:\n// ' +
+                '// 正在等待 Coder Agent 生成代码...\n// 视觉设计要求：\n// ' +
                 scene.visual_design,
             }));
             setScenes(parsedScenes);
-            addProcessLog(`[Director] 已生成 ${parsedScenes.length} 个分镜`);
+            addProcessLog(`已生成 ${parsedScenes.length} 个分镜。`);
           }
 
           if (nodeName === 'visual_architect_node' && nodeData.visual_architect) {
             addProcessLog(
-              '[Visual Architect] 主题配置已完成',
-              JSON.stringify(nodeData.visual_architect.theme_colors)
+              '已收到视觉主题配置。',
+              JSON.stringify(nodeData.visual_architect.theme_palette)
             );
           }
 
@@ -228,18 +350,24 @@ export const SourceInput: React.FC = () => {
             const coders = Array.isArray(nodeData.coder) ? nodeData.coder : [nodeData.coder];
             coders.forEach((coder: any) => {
               updateSceneCode(coder.scene_id, coder.code);
-              addProcessLog(`[Coder] ${coder.scene_id} 代码已回传`);
+              addProcessLog(`代码已返回：${coder.scene_id}`);
             });
           }
         }
       });
 
       setAiStatus('idle');
-      addProcessLog('视频生成流程已完成');
+      addProcessLog('分镜与代码生成完成。');
+      captureAnimationBaseline();
       setProcessStartTime(null);
-    } catch (err) {
-      console.error('视频生成失败:', err);
-      addProcessLog(`视频生成失败: ${(err as Error).message}`);
+    } catch (error) {
+      setWorkflowProgress('animation', {
+        status: 'error',
+        description: '分镜与代码生成失败，请检查日志后重试。',
+        lastError: (error as Error).message,
+      });
+      console.error('视频生成失败:', error);
+      addProcessLog(`视频生成失败：${(error as Error).message}`);
       setAiStatus('error');
       setProcessStartTime(null);
     }
@@ -247,120 +375,155 @@ export const SourceInput: React.FC = () => {
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="border border-gray-800 rounded-lg overflow-hidden flex-shrink-0 bg-[#141416]">
+      <div className="overflow-hidden rounded-lg border border-gray-800 bg-[#141416]">
         <button
           onClick={() => setStep1Open((v) => !v)}
-          className="w-full flex items-center justify-between px-4 py-3 bg-[#1c1c1f] hover:bg-[#232326] transition-colors"
+          className="flex w-full items-center justify-between bg-[#1c1c1f] px-4 py-3 transition-colors hover:bg-[#232326]"
         >
           <div className="flex items-center gap-2">
-            <span className="flex items-center justify-center w-5 h-5 rounded-full bg-blue-500/10 text-blue-400 text-[10px] font-bold">1</span>
-            <h3 className="text-xs text-gray-300 font-bold tracking-wide">原始技术博客</h3>
+            <span className="flex h-5 w-5 items-center justify-center rounded-full bg-blue-500/10 text-[10px] font-bold text-blue-400">
+              1
+            </span>
+            <h3 className="text-xs font-bold tracking-wide text-gray-300">输入原文</h3>
           </div>
           <div className="flex items-center gap-3">
-            {!step1Open && <span className="text-[11px] text-gray-500 font-mono">{sourceSummary}</span>}
-            {oralScript && <CheckCircle2 className="w-3.5 h-3.5 text-green-500" />}
-            {step1Open ? <ChevronUp className="w-4 h-4 text-gray-500" /> : <ChevronDown className="w-4 h-4 text-gray-500" />}
+            {!step1Open && (
+              <span className="font-mono text-[11px] text-gray-500">{sourceSummary}</span>
+            )}
+            {oralScript && <CheckCircle2 className="h-3.5 w-3.5 text-green-500" />}
+            {step1Open ? (
+              <ChevronUp className="h-4 w-4 text-gray-500" />
+            ) : (
+              <ChevronDown className="h-4 w-4 text-gray-500" />
+            )}
           </div>
         </button>
 
         <div
-          className={`border-t border-gray-800 transition-all duration-300 overflow-hidden ${
-            step1Open ? 'max-h-96 opacity-100' : 'max-h-0 opacity-0'
+          className={`overflow-hidden border-t border-gray-800 transition-all duration-300 ${
+            step1Open ? 'max-h-[28rem] opacity-100' : 'max-h-0 opacity-0'
           }`}
         >
-          <div className="p-3 flex flex-col gap-3 relative">
+          <div className="relative flex flex-col gap-3 p-3">
             <textarea
               value={sourceText}
               onChange={(e) => setSourceText(e.target.value)}
               disabled={isRewriting}
-              placeholder="在此输入原始技术博客、文章草稿或待改写内容..."
-              className={`w-full text-sm text-gray-300 bg-[#0a0a0c] p-3 rounded-md border border-gray-800 focus:border-blue-500/50 focus:outline-none resize-none leading-relaxed transition-all ${
-                isRewriting ? 'opacity-40 cursor-not-allowed' : ''
+              placeholder="在这里粘贴技术博客、草稿或待改写的原文。"
+              className={`w-full resize-none rounded-md border border-gray-800 bg-[#0a0a0c] p-3 text-sm leading-relaxed text-gray-300 transition-all focus:border-blue-500/50 focus:outline-none ${
+                isRewriting ? 'cursor-not-allowed opacity-40' : ''
               }`}
               rows={8}
             />
             {isRewriting && (
-              <div className="absolute inset-3 rounded-md flex items-center justify-center bg-transparent cursor-not-allowed pointer-events-auto" />
-            )}
-            <div className="flex items-center justify-between gap-3">
-              <span className="text-[12px] text-gray-500">先生成口语稿，再进入分镜与代码阶段</span>
-              <button
-                onClick={handleRewrite}
-                disabled={isRewriting || !sourceText}
-                className="text-sm text-white font-semibold flex items-center gap-1.5 disabled:opacity-50 transition-all bg-blue-600 hover:bg-blue-500 px-4 py-2.5 rounded shadow hover:shadow-lg hover:-translate-y-0.5 active:translate-y-0"
-              >
-                {isRewriting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
-                {isRewriting ? '正在生成口语稿...' : '转化为口语文案'}
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div className="border border-gray-800 rounded-lg overflow-hidden flex-shrink-0 bg-[#141416]">
-        <button
-          onClick={() => setStep2Open((v) => !v)}
-          className="w-full flex items-center justify-between px-4 py-3 bg-[#1c1c1f] hover:bg-[#232326] transition-colors"
-        >
-          <div className="flex items-center gap-2">
-            <span className="flex items-center justify-center w-5 h-5 rounded-full bg-purple-500/10 text-purple-400 text-[10px] font-bold">2</span>
-            <h3 className="text-xs text-gray-300 font-bold tracking-wide">视频口语化脚本</h3>
-          </div>
-          <div className="flex items-center gap-3">
-            {!step2Open && <span className="text-[11px] text-gray-500 font-mono">{oralSummary}</span>}
-            {oralScript && <CheckCircle2 className="w-3.5 h-3.5 text-green-500" />}
-            {step2Open ? <ChevronUp className="w-4 h-4 text-gray-500" /> : <ChevronDown className="w-4 h-4 text-gray-500" />}
-          </div>
-        </button>
-
-        <div
-          className={`border-t border-gray-800 transition-all duration-300 overflow-hidden ${
-            step2Open ? 'max-h-96 opacity-100' : 'max-h-0 opacity-0'
-          }`}
-        >
-          <div className="p-3 flex flex-col gap-3">
-            {isRewriting && !oralScript ? (
-              <div className="w-full bg-[#0a0a0c] rounded-md border border-gray-800 p-3" style={{ minHeight: '12rem' }}>
-                <div className="space-y-2">
-                  {[100, 80, 90, 60, 75].map((w, i) => (
-                    <div
-                      key={i}
-                      className="h-3 bg-gray-800 rounded animate-pulse"
-                      style={{ width: `${w}%`, animationDelay: `${i * 100}ms` }}
-                    />
-                  ))}
-                </div>
-              </div>
-            ) : (
-              <textarea
-                value={oralScript}
-                onChange={(e) => setOralScript(e.target.value)}
-                disabled={isRewriting}
-                placeholder="生成的口语稿会显示在这里，你也可以手动修改后再继续..."
-                className={`w-full text-sm bg-[#0a0a0c] p-3 rounded-md border ${
-                  isRewriting
-                    ? 'alert-pulse border-blue-500/50 text-gray-500'
-                    : 'border-gray-800 text-yellow-100 focus:border-purple-500/50'
-                } focus:outline-none resize-none leading-relaxed transition-all`}
-                rows={8}
-              />
+              <div className="pointer-events-auto absolute inset-3 cursor-not-allowed rounded-md bg-transparent" />
             )}
             <div className="flex items-center justify-between gap-3">
               <span className="text-[12px] text-gray-500">
-                {isGeneratingVideo ? '系统正在生成分镜、预览和代码' : '确认口语稿后再导入 Timeline'}
+                先生成口播稿，再进入分镜与代码阶段。
               </span>
               <button
-                onClick={handleGenerateVideo}
-                disabled={isGeneratingVideo || isRewriting || !oralScript}
-                className="text-sm text-white font-semibold flex items-center gap-1.5 disabled:opacity-50 transition-all bg-purple-600 hover:bg-purple-500 px-4 py-2.5 rounded shadow hover:shadow-lg hover:-translate-y-0.5 active:translate-y-0"
+                onClick={handleRewrite}
+                disabled={isRewriting || !sourceText.trim()}
+                className="flex items-center gap-1.5 rounded bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow transition-all hover:-translate-y-0.5 hover:bg-blue-500 hover:shadow-lg active:translate-y-0 disabled:opacity-50"
               >
-                {isGeneratingVideo ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Video className="w-3.5 h-3.5" />}
-                {isGeneratingVideo ? '正在编排多智能体...' : '导入 Timeline 并生成视频'}
+                {isRewriting ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Sparkles className="h-3.5 w-3.5" />
+                )}
+                {isRewriting ? '正在生成口播稿…' : '生成口播稿'}
               </button>
             </div>
           </div>
         </div>
       </div>
+
+      {(oralScript.trim() || isRewriting || rewriteStatus === 'success' || aiStatus !== 'idle') && (
+        <div className="overflow-hidden rounded-lg border border-gray-800 bg-[#141416]">
+          <button
+            onClick={() => setStep2Open((v) => !v)}
+            className="flex w-full items-center justify-between bg-[#1c1c1f] px-4 py-3 transition-colors hover:bg-[#232326]"
+          >
+            <div className="flex items-center gap-2">
+              <span className="flex h-5 w-5 items-center justify-center rounded-full bg-violet-500/10 text-[10px] font-bold text-violet-400">
+                2
+              </span>
+              <h3 className="text-xs font-bold tracking-wide text-gray-300">确认口播稿并生成分镜</h3>
+            </div>
+            <div className="flex items-center gap-3">
+              {!step2Open && (
+                <span className="font-mono text-[11px] text-gray-500">{oralSummary}</span>
+              )}
+              {oralScript && <CheckCircle2 className="h-3.5 w-3.5 text-green-500" />}
+              {step2Open ? (
+                <ChevronUp className="h-4 w-4 text-gray-500" />
+              ) : (
+                <ChevronDown className="h-4 w-4 text-gray-500" />
+              )}
+            </div>
+          </button>
+
+          <div
+            className={`overflow-hidden border-t border-gray-800 transition-all duration-300 ${
+              step2Open ? 'max-h-[28rem] opacity-100' : 'max-h-0 opacity-0'
+            }`}
+          >
+            <div className="flex flex-col gap-3 p-3">
+              {isRewriting && !oralScript ? (
+                <div
+                  className="w-full rounded-md border border-blue-500/30 bg-[#0a0a0c] p-3"
+                  style={{ minHeight: '12rem' }}
+                >
+                  <div className="mb-3 flex items-center gap-2">
+                    <div className="h-2 w-2 rounded-full bg-blue-400 animate-pulse" />
+                    <span className="text-[11px] text-blue-400">AI 正在输出口播稿…</span>
+                  </div>
+                  <div className="space-y-2">
+                    {[100, 80, 90, 60, 75].map((width, index) => (
+                      <div
+                        key={index}
+                        className="h-3 animate-pulse rounded bg-gray-800"
+                        style={{ width: `${width}%`, animationDelay: `${index * 100}ms` }}
+                      />
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <textarea
+                  value={oralScript}
+                  onChange={(e) => setOralScript(e.target.value)}
+                  disabled={isRewriting}
+                  placeholder="生成后的口播稿会显示在这里，你也可以在开始分镜前手动修改。"
+                  className={`w-full resize-none rounded-md border bg-[#0a0a0c] p-3 text-sm leading-relaxed transition-all focus:outline-none ${
+                    isRewriting
+                      ? 'border-blue-500/50 text-gray-400'
+                      : 'border-gray-800 text-yellow-100 focus:border-violet-500/50'
+                  }`}
+                  rows={8}
+                />
+              )}
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-[12px] text-gray-500">
+                  确认口播稿后再生成 Timeline、预览和代码。
+                </span>
+                <button
+                  onClick={handleGenerateVideo}
+                  disabled={isGeneratingVideo || isRewriting || !oralScript.trim()}
+                  className="flex items-center gap-1.5 rounded bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white shadow transition-all hover:-translate-y-0.5 hover:bg-violet-500 hover:shadow-lg active:translate-y-0 disabled:opacity-50"
+                >
+                  {isGeneratingVideo ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Video className="h-3.5 w-3.5" />
+                  )}
+                  {isGeneratingVideo ? '正在生成分镜…' : '生成分镜与代码'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -7,29 +7,30 @@ from models.get_model import get_model
 example = """
 ## 完整输出结构示例:
 {
+  "art_direction": "Vizplainer 画布风 (Canvas Architecture)",
   "scenes": [
     {
       "scene_id": "Scene 1",
-      "script": "这个秘密只有在深夜才会显现",
-      "visual_design": "日光灯管在凌晨 3 点突然亮起，照亮满墙倒挂的钟表",
-      "camera_language": "从俯视角度慢推，镜头在日光灯管上停 0.8 秒后微距变焦",
-      "visual_elements": "12 个倒挂钟表/日光灯管/尘埃漂浮/机械齿轮特写",
-      "visual_transition": "灯光渐变 + 齿轮转动的机械音效",
-      "emotion_rhythm": "悬念（强度 0.2）→好奇（强度 0.8）→紧张（强度 1.1）",
-      "code_render_model": "基于 Remotion 的纯 React 组件，使用 SVG 绘制钟表并使用 spring() 实现倒挂坠落动画",
+      "script": "做 AI Agent 最痛苦的事，就是明明看了很多教程，最后还是做不对。",
+      "visual_design": "暖米色网格画布中心，一个 LogicCard 贴纸弹跳进场，上方斜贴一个黄色 Stamp 标注‘PAIN POINT’。右侧预留出 FlowNode 准备空间。",
+      "camera_language": "固定视角，准备向右平移",
+      "visual_elements": "LogicCard(中心)/Stamp(右偏转)/米色坐标纸底纹",
+      "visual_transition": "LogicCard 以弹簧效果(Spring)垂直落下，Stamp 随后以 12 度倾向‘拍’在它右角。",
+      "emotion_rhythm": "沮丧（强度 0.8）",
+      "code_render_model": "AbsoluteFill + GridPattern。LogicCard 使用 border: 4px solid #000 且带 rotate: -2deg。Stamp 使用 scale 动画进场。",
+      "duration": 4.5,
       "animation_marks": {
-        "light_on": 10,
-        "zoom_start": 30,
-        "gear_turn": 60
+        "card_drop": 10,
+        "stamp_slap": 45
       }
     }
   ],
   "validation": {
-    "semantic_coverage": "完美匹配原文概念，无语义遗漏",
-    "visual_feasibility": "纯代码实现度高，依赖基础图形和位移动画",
-    "platform_adaptability": "符合短视频快节奏切镜风格",
-    "narrative_continuity": "从宏观氛围直接切入微观粒子，通过光影变化保持连贯",
-    "emotion_curve_compliance": "开场悬念迅速转入硬核科普，情绪抓力强"
+    "semantic_coverage": "完美复现了对于‘痛苦’的物理具象化表达",
+    "visual_feasibility": "贴纸与物理弹簧动效是 Vizplainer 风格的核心，纯代码实现极稳",
+    "platform_adaptability": "画布风格具有极强的视觉连续性，适合长频讲解",
+    "narrative_continuity": "为下一镜头的画布平移做好了空间布局预留",
+    "emotion_curve_compliance": "低沉的文案配合厚重的贴纸拍击感，情绪共鸣强"
   }
 }
 """
@@ -44,6 +45,7 @@ class Scene(BaseModel):
     visual_transition: str = Field(..., description="画面随时间变化的过程")
     emotion_rhythm: str = Field(..., description="当前镜头的情绪节奏")
     code_render_model: str = Field(..., description="技术实现方案")
+    duration: float = Field(..., description="预计时长（秒），根据文案字数估算（每秒约4-5个字）")
     animation_marks: dict = Field(..., description="时间轴动画锚点系统")
 
 
@@ -56,20 +58,9 @@ class Validation(BaseModel):
 
 
 class DirectorResult(BaseModel):
+    art_direction: str = Field(..., description="全局视觉美术指导风格，例如 'Vizplainer 画布风'，根据文案内容动态决定风格")
     scenes: List[Scene] = Field(..., description="完整短视频分镜列表，必须严格按照叙事顺序排列")
     validation: Validation = Field(..., description="可用性与传播性验证结果")
-
-    @field_validator("scenes", mode="before")
-    @classmethod
-    def parse_scenes(cls, value):
-        import json
-
-        if isinstance(value, str):
-            try:
-                value = json.loads(value)
-            except Exception:
-                pass
-        return value
 
 
 director_agent = {

@@ -1,12 +1,13 @@
 import os
+from pathlib import Path
 from typing import Dict
 
 from dotenv import load_dotenv
 from langchain_anthropic import ChatAnthropic
 
-load_dotenv()
+load_dotenv(dotenv_path=Path(__file__).resolve().parents[1] / ".env", override=True)
 
-DEFAULT_MODEL = "claude-sonnet-4.5"
+DEFAULT_MODEL = "deepseek-chat"
 
 MODEL_MAP = {
     "writer": DEFAULT_MODEL,

@@ -6,6 +6,7 @@ const EMPTY_SCENE: Scene = {
   durationInFrames: 150,
   componentType: 'Scene',
   script: '',
+  visual_design: '',
   code: '',
   marks: {},
 };

@@ -4,6 +4,7 @@ import type { Scene } from '../../types/scene';
 import { DraggableMark } from './DraggableMark';
 
 interface SceneCardProps {
+  index: number;
   scene: Scene;
   isActive: boolean;
   onSelect: (id: string) => void;
@@ -12,9 +13,13 @@ interface SceneCardProps {
 }
 
 export const SceneCard: React.FC<SceneCardProps> = React.memo(
-  ({ scene, isActive, onSelect, onDurationChange, onMarkChange }) => {
+  ({ index, scene, isActive, onSelect, onDurationChange, onMarkChange }) => {
     const estimatedSec = scene.script.replace(/\s/g, '').length / 4;
-    const isTooLong = estimatedSec > scene.durationInFrames / 30;
+    const durationSec = scene.durationInFrames / 30;
+    const isTooLong = estimatedSec > durationSec;
+    const sortedMarks = Object.entries(scene.marks).sort(
+      (a, b) => a[1] - b[1] || a[0].localeCompare(b[0])
+    );
 
     const handleDurationChange = useCallback(
       (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -30,75 +35,93 @@ export const SceneCard: React.FC<SceneCardProps> = React.memo(
     return (
       <div
         onClick={handleClick}
-        className={`border rounded-md transition-all relative overflow-hidden flex flex-col cursor-pointer ${
+        className={`relative flex cursor-pointer flex-col rounded-md border transition-all ${
           isActive
-            ? 'border-purple-500/50 bg-purple-500/10'
+            ? 'border-violet-500/50 bg-violet-500/10'
             : 'border-gray-800 bg-[#0e0e11] hover:border-gray-700'
         }`}
       >
-        {isActive && <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-purple-500" />}
+        {isActive && <div className="absolute bottom-0 left-0 top-0 w-0.5 bg-violet-500" />}
 
-        <div className="px-3 pt-3 pb-2">
-          <div className="flex justify-between items-center mb-2">
-            <div
-              className="flex items-center gap-1.5 bg-gray-900 rounded px-2 py-1.5 border border-gray-700 min-h-[36px]"
+        <div className="px-3 pb-2 pt-3">
+          <div className="mb-2 flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <span className="rounded bg-gray-900 px-2 py-1 text-[11px] font-mono text-gray-400">
+                  #{index + 1}
+                </span>
+                <span
+                  className={`rounded px-2 py-1 text-[11px] ${
+                    isActive
+                      ? 'bg-violet-500/20 text-violet-200'
+                      : 'bg-gray-800 text-gray-400'
+                  }`}
+                >
+                  {scene.componentType}
+                </span>
+                {isTooLong && (
+                  <span className="rounded bg-red-500/10 px-2 py-1 text-[11px] font-mono text-red-400">
+                    文案超长
+                  </span>
+                )}
+              </div>
+              <p
+                className={`mt-2 line-clamp-3 break-words text-[12px] leading-relaxed ${
+                  isActive ? 'text-violet-100' : 'text-gray-400'
+                }`}
+                title={scene.script}
+              >
+                {scene.script}
+              </p>
+              {scene.visual_design && (
+                <p className="mt-2 line-clamp-2 break-words border-l-2 border-gray-700 pl-2 text-[11px] leading-relaxed text-gray-500">
+                  {scene.visual_design}
+                </p>
+              )}
+            </div>
+
+            <label
+              className="flex min-h-11 items-center gap-2 rounded border border-gray-700 bg-gray-900 px-3 py-2"
               onClick={(e) => e.stopPropagation()}
             >
-              <Clock className="w-3.5 h-3.5 text-gray-400" />
+              <Clock className="h-4 w-4 text-gray-400" />
               <input
                 type="number"
-                value={scene.durationInFrames / 30}
+                min={1}
+                step={0.5}
+                value={Math.round(durationSec * 10) / 10}
                 onChange={handleDurationChange}
-                className="w-10 bg-transparent text-[12px] text-center text-gray-300 outline-none font-mono"
+                className="w-14 bg-transparent text-center text-[12px] font-mono text-gray-200 outline-none"
+                aria-label="镜头时长（秒）"
               />
-              <span className="text-[11px] text-gray-500">s</span>
-            </div>
-            <div className="flex items-center gap-2">
-              {isTooLong && (
-                <span className="text-[11px] text-red-400 font-mono" title="文案时长超出片段时长">
-                  超长
-                </span>
-              )}
-              <span
-                className={`text-[11px] px-2 py-1 rounded ${
-                  isActive
-                    ? 'text-purple-300 bg-purple-500/20'
-                    : 'text-gray-400 bg-gray-800'
-                }`}
-              >
-                {scene.componentType}
-              </span>
-            </div>
+              <span className="text-[11px] text-gray-500">秒</span>
+            </label>
           </div>
 
-          <p
-            className={`text-[12px] leading-relaxed truncate ${
-              isActive ? 'text-purple-200' : 'text-gray-400'
-            }`}
-            title={scene.script}
-          >
-            {scene.script}
-          </p>
+          <div className="flex items-center justify-between text-[11px] font-mono text-gray-500">
+            <span>预计旁白 {estimatedSec.toFixed(1)}s</span>
+            <span>镜头时长 {durationSec.toFixed(1)}s</span>
+          </div>
         </div>
 
-        <div className="h-10 bg-black/40 border-t border-gray-800/50 relative rhythm-track">
-          <div className="absolute inset-0 flex pointer-events-none">
+        <div className="rhythm-track relative h-12 border-t border-gray-800/50 bg-black/40">
+          <div className="pointer-events-none absolute inset-0 flex">
             {Array.from({
               length: Math.max(1, Math.floor(scene.durationInFrames / 30)),
             }).map((_, i) => (
-              <div key={i} className="flex-1 border-r border-gray-800/40 h-full relative">
-                <span className="absolute left-1 top-1 text-[9px] text-gray-600 font-mono leading-none">
+              <div key={i} className="relative h-full flex-1 border-r border-gray-800/40">
+                <span className="absolute left-1.5 top-1 text-[10px] font-mono leading-none text-gray-600">
                   {i}s
                 </span>
               </div>
             ))}
           </div>
           {Object.keys(scene.marks).length === 0 && (
-            <span className="absolute right-2 top-1 text-[10px] text-gray-700 font-mono leading-none pointer-events-none">
+            <span className="pointer-events-none absolute right-2 top-1 text-[10px] font-mono leading-none text-gray-700">
               暂无时间锚点
             </span>
           )}
-          {Object.entries(scene.marks).map(([key, frame]) => (
+          {sortedMarks.map(([key, frame]) => (
             <DraggableMark
               key={key}
               sceneId={scene.id}

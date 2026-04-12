@@ -3,34 +3,35 @@ import { Sparkles } from 'lucide-react';
 import { SourceInput } from './SourceInput';
 import { Timeline } from './Timeline';
 import { ScriptEditor } from './ScriptEditor';
+import { WorkflowStatus } from './WorkflowStatus';
+import { useIdeStore } from '../../store/useIdeStore';
 
-/**
- * 左侧面板组合容器。
- * - 持有 scriptPanelOpen 这个纯 UI 状态（不需要跨组件，不需要入 store）
- * - 三个子区域：博文输入 / Timeline / 文案编辑台
- */
 export const LeftPanel: React.FC = () => {
-  const [scriptPanelOpen, setScriptPanelOpen] = useState(true);
+  const [scriptPanelOpen, setScriptPanelOpen] = useState(false);
+  const hasScenes = useIdeStore((s) => s.scenes.length > 0);
 
   return (
-    <div className="w-[28%] border-r border-gray-800 flex flex-col bg-[#18181b] min-h-0">
-      {/* 顶部 Logo */}
-      <div className="p-4 border-b border-gray-800 flex items-center gap-2 flex-shrink-0">
-        <Sparkles className="w-5 h-5 text-purple-500" />
-        <h2 className="font-bold text-gray-100 text-sm">AI-Code-Video IDE</h2>
+    <div className="flex min-h-0 w-[30%] flex-col overflow-hidden border-r border-gray-800 bg-[#18181b]">
+      <div className="flex flex-shrink-0 items-center gap-2 border-b border-gray-800 p-4">
+        <Sparkles className="h-5 w-5 text-violet-500" />
+        <div>
+          <h2 className="text-sm font-bold text-gray-100">AI Code Video IDE</h2>
+          <p className="mt-1 text-[12px] text-gray-500">按顺序完成原文、口播稿、分镜和代码。</p>
+        </div>
       </div>
 
-      {/* 上半区：博文原文 + Timeline（可滚动） */}
-      <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-4 min-h-0">
+      <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-hidden p-4">
+        <WorkflowStatus />
         <SourceInput />
         <Timeline />
       </div>
 
-      {/* 下半区：可折叠文案编辑台 */}
-      <ScriptEditor
-        isOpen={scriptPanelOpen}
-        onToggle={() => setScriptPanelOpen((v) => !v)}
-      />
+      {hasScenes && (
+        <ScriptEditor
+          isOpen={scriptPanelOpen}
+          onToggle={() => setScriptPanelOpen((value) => !value)}
+        />
+      )}
     </div>
   );
 };

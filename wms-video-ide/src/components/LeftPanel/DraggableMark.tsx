@@ -71,9 +71,10 @@ export const DraggableMark: React.FC<DraggableMarkProps> = React.memo(
           transform: 'translateX(-50%)',
           zIndex: isDragging ? 50 : 10,
           cursor: 'ew-resize',
-          paddingLeft: '18px',
-          paddingRight: '18px',
-          marginLeft: '-18px',
+          minWidth: '44px',
+          paddingLeft: '22px',
+          paddingRight: '22px',
+          marginLeft: '-22px',
         }}
         onPointerDown={handlePointerDown}
       >
