@@ -1,5 +1,6 @@
 import hashlib
 import json
+import os
 from pathlib import Path
 from typing import Any, Optional, Type
 
@@ -12,8 +13,13 @@ CACHE_DIR.mkdir(parents=True, exist_ok=True)
 logger = get_logger(__name__)
 
 
-def build_cache_key(*parts: str) -> str:
-    raw = "||".join(parts)
+def get_prompt_version() -> str:
+    return os.getenv("VIDEO_BACK_PROMPT_VERSION") or os.getenv("PROMPT_VERSION") or "v1"
+
+
+def build_cache_key(*parts: str, prompt_version: str | None = None) -> str:
+    normalized_parts = [prompt_version or get_prompt_version(), *parts]
+    raw = "||".join(normalized_parts)
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 

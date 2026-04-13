@@ -35,6 +35,18 @@ def _extract_json_block(text: str) -> str:
     return text[start : end + 1]
 
 
+def _normalize_structured_value(value: Any) -> Any:
+    if isinstance(value, BaseModel):
+        return value.model_dump()
+    if isinstance(value, dict):
+        return value
+    if hasattr(value, "model_dump"):
+        return value.model_dump()
+    if hasattr(value, "__dict__"):
+        return vars(value)
+    return value
+
+
 def invoke_structured(
     *,
     model: Any,
@@ -52,7 +64,8 @@ def invoke_structured(
             except TypeError:
                 runnable = model.with_structured_output(schema)
             result = runnable.invoke(messages)
-            validated = result if isinstance(result, schema) else schema.model_validate(result)
+            normalized = _normalize_structured_value(result)
+            validated = result if isinstance(result, schema) else schema.model_validate(normalized)
             logger.info("Structured invoke success operation=%s method=%s", operation, method)
             return validated
         except Exception:
