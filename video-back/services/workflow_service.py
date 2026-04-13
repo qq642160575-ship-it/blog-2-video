@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import json
 import time
@@ -14,38 +16,21 @@ logger = get_logger(__name__)
 
 WORKFLOW_STAGE_PLANS: dict[str, list[dict[str, Any]]] = {
     "conversational_tone": [
-        {
-            "node_key": "content_writer",
-            "label": "正在改写口播稿",
-            "description": "把原文改写成更适合短视频讲述的口播表达。",
-            "estimate_seconds": 25,
-        },
-        {
-            "node_key": "content_reviewer",
-            "label": "正在评估口播质量",
-            "description": "检查节奏、清晰度和可讲述性，必要时会继续优化。",
-            "estimate_seconds": 15,
-        },
+        {"node_key": "rewrite_oral_script_node", "label": "正在改写口语稿", "description": "把博文转成适合短视频讲述的口语稿。", "estimate_seconds": 20},
+        {"node_key": "review_oral_script_node", "label": "正在评审口语稿", "description": "检查节奏、清晰度和可讲述性。", "estimate_seconds": 12},
+        {"node_key": "finalize_oral_script_node", "label": "正在整理脚本段落", "description": "切分讲述段落并生成结构化脚本。", "estimate_seconds": 4},
     ],
     "animation": [
-        {
-            "node_key": "director_node",
-            "label": "正在拆分镜头",
-            "description": "把口播稿拆成短视频镜头段落，并估算每段时长。",
-            "estimate_seconds": 30,
-        },
-        {
-            "node_key": "visual_architect_node",
-            "label": "正在设计视觉方案",
-            "description": "规划画面安全区、元素布局、主题色和动画节奏。",
-            "estimate_seconds": 35,
-        },
-        {
-            "node_key": "coder_node",
-            "label": "正在生成镜头代码",
-            "description": "把每个镜头方案转换成可预览的 Remotion 代码。",
-            "estimate_seconds": 90,
-        },
+        {"node_key": "parse_oral_script_node", "label": "正在解析口语稿", "description": "把口语稿整理成可编译的讲述结构。", "estimate_seconds": 4},
+        {"node_key": "plan_scenes_node", "label": "正在规划镜头", "description": "根据讲述节奏生成场景顺序与视觉目标。", "estimate_seconds": 4},
+        {"node_key": "generate_marks_node", "label": "正在生成时间轴", "description": "统一生成全局与局部动画 marks。", "estimate_seconds": 3},
+        {"node_key": "compile_layout_node", "label": "正在编译布局", "description": "为每个场景计算安全区内的布局盒模型。", "estimate_seconds": 3},
+        {"node_key": "compile_motion_node", "label": "正在编译动效", "description": "按 marks 绑定场景动效和进场顺序。", "estimate_seconds": 3},
+        {"node_key": "generate_dsl_node", "label": "正在生成 DSL", "description": "输出中间渲染语法树。", "estimate_seconds": 2},
+        {"node_key": "generate_scene_code_node", "label": "正在生成代码", "description": "基于 DSL 模板化生成 Remotion 代码。", "estimate_seconds": 5},
+        {"node_key": "validate_scene_node", "label": "正在校验结果", "description": "检查布局越界、引用错误和代码兼容性。", "estimate_seconds": 3},
+        {"node_key": "repair_scene_node", "label": "正在自动修复", "description": "对可修复场景执行降级或修正。", "estimate_seconds": 3},
+        {"node_key": "finalize_output_node", "label": "正在封装结果", "description": "整理最终场景、代码与校验输出。", "estimate_seconds": 1},
     ],
 }
 
@@ -58,18 +43,11 @@ def estimate_total_seconds(workflow_name: str, initial_state: dict[str, Any] | N
     base_total = sum(stage["estimate_seconds"] for stage in get_stage_plan(workflow_name))
     source = ""
     if initial_state:
-        source = str(initial_state.get("script") or initial_state.get("oral_content") or "")
-
+        source = str(initial_state.get("source_text") or initial_state.get("oral_script") or "")
     if workflow_name == "animation":
-        # Coder work scales with the script length because longer scripts usually produce more scenes.
-        estimated_scene_count = max(2, min(8, round(len(source) / 80) or 2))
-        return 30 + 35 + estimated_scene_count * 25
-
-    if workflow_name == "conversational_tone":
-        estimated_loops = 1 if len(source) < 500 else 2
-        return max(base_total, estimated_loops * base_total)
-
-    return max(base_total, 30)
+        estimated_scene_count = max(2, min(8, round(len(source) / 40) or 2))
+        return max(base_total, 10 + estimated_scene_count * 6)
+    return max(base_total, 20)
 
 
 def extract_update_node(chunk: Any) -> tuple[str | None, Any | None]:
@@ -98,16 +76,10 @@ def build_progress_payload(
     total_count = max(1, len(stage_plan))
     elapsed_seconds = max(0, int(time.perf_counter() - started_at))
     percent = min(100, max(0, round((completed_count / total_count) * 100)))
-    if status == "running" and completed_count == 0:
-        percent = max(percent, 3)
     if status == "running":
-        percent = min(percent, 95)
-    if status == "success":
+        percent = min(max(percent, 3), 95)
+    elif status in {"success", "partial_success"}:
         percent = 100
-
-    eta_seconds = None
-    if status == "running":
-        eta_seconds = max(0, estimated_total_seconds - elapsed_seconds)
 
     return {
         "type": "progress",
@@ -124,7 +96,7 @@ def build_progress_payload(
             "total_count": total_count,
             "percent": percent,
             "elapsed_seconds": elapsed_seconds,
-            "eta_seconds": eta_seconds,
+            "eta_seconds": max(0, estimated_total_seconds - elapsed_seconds) if status == "running" else None,
             "estimated_total_seconds": estimated_total_seconds,
             "detail": detail or {},
         },
@@ -132,16 +104,13 @@ def build_progress_payload(
 
 
 def next_stage_key(workflow_name: str, completed_node_key: str | None) -> str | None:
-    stage_plan = get_stage_plan(workflow_name)
-    keys = [stage["node_key"] for stage in stage_plan]
+    keys = [stage["node_key"] for stage in get_stage_plan(workflow_name)]
     if not keys:
         return None
     if completed_node_key not in keys:
         return keys[0]
     next_index = keys.index(completed_node_key) + 1
-    if next_index >= len(keys):
-        return completed_node_key
-    return keys[next_index]
+    return keys[min(next_index, len(keys) - 1)]
 
 
 def sse_data(payload: dict[str, Any]) -> str:
@@ -150,11 +119,8 @@ def sse_data(payload: dict[str, Any]) -> str:
 
 def resolve_workflow(workflow_name: str) -> Any:
     try:
-        workflow = get_workflow(workflow_name)
-        logger.debug("Resolved workflow=%s", workflow_name)
-        return workflow
+        return get_workflow(workflow_name)
     except KeyError as exc:
-        logger.warning("Unknown workflow requested workflow=%s", workflow_name)
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
@@ -193,7 +159,6 @@ def serialize_snapshot(snapshot: Any) -> dict[str, Any]:
     parent_config = getattr(snapshot, "parent_config", None) or {}
     parent_configurable = parent_config.get("configurable", {}) if parent_config else {}
     metadata = getattr(snapshot, "metadata", {}) or {}
-
     return {
         "checkpoint_id": configurable.get("checkpoint_id"),
         "thread_id": configurable.get("thread_id"),
@@ -214,11 +179,6 @@ def find_snapshot(workflow: Any, thread_id: str, checkpoint_id: str) -> Any:
         current_checkpoint_id = snapshot.config.get("configurable", {}).get("checkpoint_id")
         if current_checkpoint_id == checkpoint_id:
             return snapshot
-    logger.warning(
-        "Checkpoint not found workflow_snapshot_search thread_id=%s checkpoint_id=%s",
-        thread_id,
-        checkpoint_id,
-    )
     raise HTTPException(status_code=404, detail="Checkpoint not found")
 
 
@@ -233,21 +193,15 @@ async def iterate_workflow_updates(
     initial_state: dict[str, Any] | None,
     run_config: dict[str, Any],
 ) -> AsyncIterator[Any]:
-    stream_kwargs = {
-        "config": run_config,
-        "stream_mode": "updates",
-        "version": "v2",
-    }
+    stream_kwargs = {"config": run_config, "stream_mode": "updates", "version": "v2"}
     if hasattr(workflow, "astream"):
         async for chunk in workflow.astream(initial_state, **stream_kwargs):
             yield chunk
         return
-
     if hasattr(workflow, "stream"):
         async for chunk in _stream_from_sync_iterator(workflow.stream(initial_state, **stream_kwargs)):
             yield chunk
         return
-
     raise RuntimeError("Workflow does not support streaming")
 
 
@@ -265,14 +219,8 @@ async def stream_graph_updates(
     estimated_total_seconds = estimate_total_seconds(workflow_name, initial_state)
     completed_nodes: set[str] = set()
     first_stage_key = next_stage_key(workflow_name, None)
+    had_error = False
 
-    logger.info(
-        "Streaming workflow start request_id=%s workflow=%s thread_id=%s checkpoint_id=%s",
-        request_id,
-        workflow_name,
-        thread_id,
-        start_checkpoint_id,
-    )
     yield {
         "type": "setup",
         "request_id": request_id,
@@ -280,28 +228,17 @@ async def stream_graph_updates(
         "thread_id": thread_id,
         "checkpoint_id": start_checkpoint_id,
         "progress": build_progress_payload(
-            workflow_name=workflow_name,
-            request_id=request_id,
-            thread_id=thread_id,
-            start_checkpoint_id=start_checkpoint_id,
-            started_at=started_at,
-            estimated_total_seconds=estimated_total_seconds,
-            node_key=first_stage_key,
-            status="running",
-            completed_count=0,
+            workflow_name,
+            request_id,
+            thread_id,
+            start_checkpoint_id,
+            started_at,
+            estimated_total_seconds,
+            first_stage_key,
+            "running",
+            0,
         )["progress"],
     }
-    yield build_progress_payload(
-        workflow_name=workflow_name,
-        request_id=request_id,
-        thread_id=thread_id,
-        start_checkpoint_id=start_checkpoint_id,
-        started_at=started_at,
-        estimated_total_seconds=estimated_total_seconds,
-        node_key=first_stage_key,
-        status="running",
-        completed_count=0,
-    )
 
     try:
         async for chunk in iterate_workflow_updates(workflow, initial_state, run_config):
@@ -310,26 +247,20 @@ async def stream_graph_updates(
                 completed_nodes.add(node_name)
             completed_count = min(len(completed_nodes), max(1, len(get_stage_plan(workflow_name))))
             progress = build_progress_payload(
-                workflow_name=workflow_name,
-                request_id=request_id,
-                thread_id=thread_id,
-                start_checkpoint_id=start_checkpoint_id,
-                started_at=started_at,
-                estimated_total_seconds=estimated_total_seconds,
-                node_key=next_stage_key(workflow_name, node_name),
-                status="running",
-                completed_count=completed_count,
+                workflow_name,
+                request_id,
+                thread_id,
+                start_checkpoint_id,
+                started_at,
+                estimated_total_seconds,
+                next_stage_key(workflow_name, node_name),
+                "running",
+                completed_count,
                 detail={
                     "completed_node": node_name,
                     "last_action": node_data.get("last_action") if isinstance(node_data, dict) else None,
                 },
             )["progress"]
-            logger.debug(
-                "Workflow update request_id=%s workflow=%s thread_id=%s",
-                request_id,
-                workflow_name,
-                thread_id,
-            )
             yield {
                 "type": "updates",
                 "request_id": request_id,
@@ -338,22 +269,17 @@ async def stream_graph_updates(
                 "data": jsonable_encoder(chunk),
                 "progress": progress,
             }
-            if progress["status"] == "running":
-                yield {
-                    "type": "progress",
-                    "request_id": request_id,
-                    "workflow": workflow_name,
-                    "thread_id": thread_id,
-                    "checkpoint_id": start_checkpoint_id,
-                    "progress": progress,
-                }
+            yield {
+                "type": "progress",
+                "request_id": request_id,
+                "workflow": workflow_name,
+                "thread_id": thread_id,
+                "checkpoint_id": start_checkpoint_id,
+                "progress": progress,
+            }
     except Exception as exc:
-        logger.exception(
-            "Workflow stream failed request_id=%s workflow=%s thread_id=%s",
-            request_id,
-            workflow_name,
-            thread_id,
-        )
+        had_error = True
+        logger.exception("Workflow stream failed workflow=%s thread_id=%s", workflow_name, thread_id)
         yield {
             "type": "error",
             "request_id": request_id,
@@ -361,44 +287,61 @@ async def stream_graph_updates(
             "thread_id": thread_id,
             "message": str(exc),
             "progress": build_progress_payload(
-                workflow_name=workflow_name,
-                request_id=request_id,
-                thread_id=thread_id,
-                start_checkpoint_id=start_checkpoint_id,
-                started_at=started_at,
-                estimated_total_seconds=estimated_total_seconds,
-                node_key=next_stage_key(workflow_name, None),
-                status="error",
-                completed_count=len(completed_nodes),
+                workflow_name,
+                request_id,
+                thread_id,
+                start_checkpoint_id,
+                started_at,
+                estimated_total_seconds,
+                next_stage_key(workflow_name, None),
+                "error",
+                len(completed_nodes),
                 message=str(exc),
             )["progress"],
         }
     finally:
         latest_checkpoint_id = get_latest_checkpoint_id(workflow, thread_id)
-        logger.info(
-            "Streaming workflow end request_id=%s workflow=%s thread_id=%s checkpoint_id=%s",
-            request_id,
-            workflow_name,
-            thread_id,
-            latest_checkpoint_id,
-        )
+        final_state_values = {}
+        try:
+            if thread_id:
+                final_state_values = workflow.get_state(build_run_config(thread_id)).values
+        except Exception:
+            logger.exception("Failed to read final state workflow=%s thread_id=%s", workflow_name, thread_id)
+
+        failed_scenes = list(final_state_values.get("failed_scenes", []) or [])
+        total_scenes = len(final_state_values.get("scenes", []) or [])
+        if had_error:
+            end_status = "error"
+            end_message = "工作流执行失败。"
+        elif failed_scenes and total_scenes and len(failed_scenes) < total_scenes:
+            end_status = "partial_success"
+            end_message = f"部分场景失败 ({len(failed_scenes)}/{total_scenes})，其余结果已保留。"
+        elif failed_scenes and total_scenes:
+            end_status = "error"
+            end_message = "所有场景均失败。"
+        else:
+            end_status = "success"
+            end_message = "工作流已完成。"
+
         yield {
             "type": "end",
             "request_id": request_id,
             "workflow": workflow_name,
             "thread_id": thread_id,
             "checkpoint_id": latest_checkpoint_id,
+            "status": end_status,
             "progress": build_progress_payload(
-                workflow_name=workflow_name,
-                request_id=request_id,
-                thread_id=thread_id,
-                start_checkpoint_id=latest_checkpoint_id,
-                started_at=started_at,
-                estimated_total_seconds=estimated_total_seconds,
-                node_key=next_stage_key(workflow_name, None),
-                status="success",
-                completed_count=max(1, len(get_stage_plan(workflow_name))),
-                message="工作流已完成。",
+                workflow_name,
+                request_id,
+                thread_id,
+                latest_checkpoint_id,
+                started_at,
+                estimated_total_seconds,
+                next_stage_key(workflow_name, None),
+                end_status,
+                max(1, len(get_stage_plan(workflow_name))),
+                message=end_message,
+                detail={"failed_scenes": failed_scenes, "total_scenes": total_scenes},
             )["progress"],
         }
 
@@ -410,27 +353,15 @@ async def stream_workflow_response(
 ) -> AsyncIterator[str]:
     workflow = resolve_workflow(workflow_name)
     request_id = str(uuid.uuid4())
+    thread_id = run_config.get("configurable", {}).get("thread_id")
     start = time.perf_counter()
     has_error = False
-    thread_id = run_config.get("configurable", {}).get("thread_id")
 
     try:
-        async for payload in stream_graph_updates(
-            workflow=workflow,
-            initial_state=initial_state,
-            request_id=request_id,
-            workflow_name=workflow_name,
-            run_config=run_config,
-        ):
-            has_error = has_error or payload["type"] == "error"
+        async for payload in stream_graph_updates(workflow, initial_state, request_id, workflow_name, run_config):
+            has_error = has_error or payload["type"] == "error" or payload.get("status") == "error"
             yield sse_data(payload)
     except Exception as exc:
-        logger.exception(
-            "Workflow response failed request_id=%s workflow=%s thread_id=%s",
-            request_id,
-            workflow_name,
-            thread_id,
-        )
         log_event(
             level="error",
             request_id=request_id,
@@ -455,24 +386,60 @@ async def stream_workflow_response(
         )
 
 
+async def stream_video_pipeline_response(source_text: str, thread_id: str) -> AsyncIterator[str]:
+    script_thread_id = f"{thread_id}:script"
+    animation_thread_id = f"{thread_id}:animation"
+
+    async for payload in stream_workflow_response(
+        "conversational_tone",
+        build_conversational_initial_state(source_text),
+        build_run_config(script_thread_id),
+    ):
+        yield payload
+
+    script_workflow = resolve_workflow("conversational_tone")
+    script_state = script_workflow.get_state(build_run_config(script_thread_id)).values
+    oral_script_result = script_state.get("oral_script_result") or {}
+    oral_script = oral_script_result.get("oral_script") or script_state.get("current_script") or source_text
+
+    async for payload in stream_workflow_response(
+        "animation",
+        build_animation_initial_state(oral_script, oral_script_result=oral_script_result),
+        build_run_config(animation_thread_id),
+    ):
+        yield payload
+
+
 def build_conversational_initial_state(source_text: str) -> dict[str, Any]:
     return {
-        "oral_content": source_text,
+        "source_text": source_text,
         "current_script": "",
         "review_score": None,
         "last_feedback": None,
         "loop_count": 0,
+        "oral_script_result": None,
         "last_action": None,
     }
 
 
-def build_animation_initial_state(source_text: str) -> dict[str, Any]:
+def build_animation_initial_state(oral_script: str, oral_script_result: dict[str, Any] | None = None) -> dict[str, Any]:
     return {
-        "script": source_text,
-        "director": None,
-        "visual_architect": None,
-        "coder": [],
+        "oral_script": oral_script,
+        "oral_script_result": oral_script_result,
+        "parsed_script": None,
+        "scenes": [],
+        "marks": None,
+        "layouts": {},
+        "motions": {},
+        "dsl": {},
+        "codes": {},
+        "validations": {},
+        "patches": {},
         "failed_scenes": [],
-        "max_parallel_coders": 4,
+        "repairable_scenes": [],
+        "theme_profile": None,
+        "compile_config": {"fps": 30, "aspect_ratio": "9:16"},
+        "regenerate_scene_id": None,
+        "recompile_from": None,
         "last_action": None,
     }

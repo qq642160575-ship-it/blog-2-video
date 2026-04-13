@@ -1,68 +1,97 @@
-import json
-from typing import Any
+from __future__ import annotations
 
-from utils.logger import get_logger
-from utils.cache import build_cache_key
-from workflow.animation_work_flow import coder_cache
+from copy import deepcopy
 
-logger = get_logger(__name__)
+from compiler.schemas import ScenePatch
 
-
-def _scene_id(scene: Any) -> str | None:
-    if isinstance(scene, dict):
-        return scene.get("scene_id")
-    return getattr(scene, "scene_id", None)
-
-
-def _update_scene_fields(scene: Any, script: str, visual_design: str) -> Any:
-    if isinstance(scene, dict):
-        updated = dict(scene)
-        updated["script"] = script
-        updated["visual_design"] = visual_design
-        return updated
-
-    scene.script = script
-    scene.visual_design = visual_design
-    return scene
+RECOMPILE_NODE_BY_STAGE = {
+    "layout": "compile_layout_node",
+    "motion": "compile_motion_node",
+    "dsl": "generate_dsl_node",
+    "code": "generate_scene_code_node",
+    "validate": "validate_scene_node",
+}
 
 
-def _dump_json(value: Any) -> str:
-    if hasattr(value, "model_dump_json"):
-        return value.model_dump_json()
-    return json.dumps(value, ensure_ascii=False, default=str)
-
-
-def update_director_scenes(director_result: Any, scene_id: str, script: str, visual_design: str) -> tuple[Any, Any]:
-    updated_scenes = []
-    target_scene = None
-
-    scenes = director_result.get("scenes", []) if isinstance(director_result, dict) else director_result.scenes
+def _find_scene(scenes: list[dict], scene_id: str) -> dict:
     for scene in scenes:
-        if _scene_id(scene) == scene_id:
-            scene = _update_scene_fields(scene, script, visual_design)
-            target_scene = scene
-        updated_scenes.append(scene)
-
-    if target_scene is None:
-        raise ValueError(f"Scene not found: {scene_id}")
-
-    if isinstance(director_result, dict):
-        updated_director_result = dict(director_result)
-        updated_director_result["scenes"] = updated_scenes
-    else:
-        director_result.scenes = updated_scenes
-        updated_director_result = director_result
-
-    logger.info("Scene updated scene_id=%s", scene_id)
-    return updated_director_result, target_scene
+        if scene.get("scene_id") == scene_id:
+            return scene
+    raise ValueError(f"Scene not found: {scene_id}")
 
 
-def clear_scene_coder_cache(scene: Any, visual_architect: Any) -> bool:
-    if not visual_architect:
-        logger.debug("Skip coder cache clear because visual_architect is missing")
-        return False
+def prepare_scene_recompile(
+    *,
+    current_state: dict,
+    scene_id: str,
+    oral_script: str | None,
+    recompile_from: str,
+) -> tuple[dict, str]:
+    scenes = deepcopy(current_state.get("scenes", []))
+    target_scene = _find_scene(scenes, scene_id)
+    if oral_script:
+        target_scene["text"] = oral_script.strip()
 
-    cache_key = build_cache_key("coder-agent", _dump_json(scene), _dump_json(visual_architect))
-    deleted = coder_cache.delete(cache_key)
-    logger.info("Scene coder cache clear scene_id=%s deleted=%s", _scene_id(scene), deleted)
-    return deleted
+    updated_values = {
+        "oral_script": current_state.get("oral_script"),
+        "scenes": scenes,
+        "failed_scenes": [],
+        "repairable_scenes": [],
+        "regenerate_scene_id": scene_id,
+        "recompile_from": recompile_from,
+        "last_action": f"重编译 {scene_id} from {recompile_from}",
+    }
+
+    if recompile_from in {"layout", "motion", "dsl", "code", "validate"}:
+        updated_values["layouts"] = current_state.get("layouts", {})
+        updated_values["motions"] = current_state.get("motions", {})
+        updated_values["dsl"] = current_state.get("dsl", {})
+        updated_values["codes"] = current_state.get("codes", {})
+        updated_values["validations"] = current_state.get("validations", {})
+
+    return updated_values, RECOMPILE_NODE_BY_STAGE.get(recompile_from, "compile_layout_node")
+
+
+def apply_scene_patch(*, current_state: dict, scene_id: str, patch: ScenePatch) -> tuple[dict, str]:
+    target = patch.target or scene_id
+    if target != scene_id:
+        raise ValueError("Patch target must match scene_id")
+
+    layouts = deepcopy(current_state.get("layouts", {}))
+    scene_layout = layouts.get(scene_id)
+    if scene_layout is None:
+        raise ValueError("Scene layout not found")
+
+    for op in patch.ops:
+        if not op.path.startswith("/"):
+            raise ValueError("Patch path must start with '/'")
+        parts = [part for part in op.path.strip("/").split("/") if part]
+        cursor = scene_layout
+        for part in parts[:-1]:
+            if part.isdigit():
+                cursor = cursor[int(part)]
+            else:
+                cursor = cursor[part]
+        key = parts[-1]
+        if op.op in {"replace", "add"}:
+            if key.isdigit():
+                cursor[int(key)] = op.value
+            else:
+                cursor[key] = op.value
+        elif op.op == "remove":
+            if key.isdigit():
+                del cursor[int(key)]
+            else:
+                cursor.pop(key, None)
+
+    return (
+        {
+            "layouts": layouts,
+            "failed_scenes": [],
+            "repairable_scenes": [],
+            "regenerate_scene_id": scene_id,
+            "recompile_from": "motion",
+            "last_action": f"应用 patch 到 {scene_id}",
+        },
+        "compile_motion_node",
+    )

@@ -1,41 +1,36 @@
-import json
+import asyncio
+import sys
 import unittest
-import uuid
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from fastapi.testclient import TestClient
+sys.path.append(str(Path(__file__).resolve().parents[1]))
 
-import agents.coder as coder_module
-import agents.qa_guard as qa_module
-import main as app_main
-from agents.content_reviewer import content_reviewer_agent
-from agents.content_writer import content_writer_agent
-from agents.director import Scene
-from agents.visual_architect import LayoutBlueprintItem, ThemePalette, VisualProtocol
-from models.get_model import get_model
-from prompts.manager import PromptManager
-from utils.cache import SimpleCache
-from utils.structured_output import invoke_structured
-from workflow import animation_work_flow as animation_module
-from workflow import conversational_tone_work_flow as conversational_module
-from workflow.animation_work_flow import CoderTaskState
-
-
-def parse_sse_payloads(raw_text: str) -> list[dict]:
-    payloads = []
-    for block in raw_text.strip().split("\n\n"):
-        if block.startswith("data: "):
-            payloads.append(json.loads(block[6:]))
-    return payloads
+from compiler.code_generator import generate_scene_code
+from compiler.dsl_generator import generate_dsl
+from compiler.layout_compiler import compile_layouts
+from compiler.marks_engine import build_marks
+from compiler.motion_compiler import compile_motions
+from compiler.parser import parse_script
+from compiler.scene_planner import build_scene_plan
+from compiler.schemas import LayoutSpec, MarksBundle, MotionSpec, RemotionDSL, SceneCode
+from compiler.validator import validate_scene_bundle
+from services.workflow_service import (
+    build_animation_initial_state,
+    build_conversational_initial_state,
+    build_run_config,
+    stream_workflow_response,
+)
 
 
 class AsyncWorkflowSuccess:
     async def astream(self, initial_state, **kwargs):
-        yield {"content_writer": {"current_script": "demo"}}
+        yield {"rewrite_oral_script_node": {"current_script": "demo oral"}}
+        yield {"finalize_oral_script_node": {"oral_script_result": {"oral_script": "demo oral"}}}
 
     def get_state(self, config):
-        return SimpleNamespace(config={"configurable": {"checkpoint_id": "cp-1"}})
+        return SimpleNamespace(config={"configurable": {"checkpoint_id": "cp-1"}}, values={})
 
 
 class AsyncWorkflowError:
@@ -44,220 +39,68 @@ class AsyncWorkflowError:
         yield
 
     def get_state(self, config):
-        return SimpleNamespace(config={"configurable": {"checkpoint_id": "cp-1"}})
-
-
-class CountingInvokeModel:
-    def __init__(self, result):
-        self.result = result
-        self.calls = 0
-
-    def invoke(self, messages):
-        self.calls += 1
-        return SimpleNamespace(content=self.result)
-
-
-class RaisingStructuredModel:
-    def with_structured_output(self, schema):
-        return self
-
-    def invoke(self, messages):
-        raise RuntimeError("coder failed")
-
-
-class FailingStructuredModel:
-    def with_structured_output(self, schema):
-        return self
-
-    def invoke(self, messages):
-        return SimpleNamespace(status="Fail", suggestions="broken")
-
-
-class MethodSensitiveStructuredModel:
-    def __init__(self, payload: str):
-        self.payload = payload
-
-    def with_structured_output(self, schema, method="function_calling"):
-        if method == "json_schema":
-            raise RuntimeError("json_schema unsupported")
-        return self
-
-    def invoke(self, messages):
-        return SimpleNamespace(content=self.payload)
-
-
-def build_visual_protocol() -> VisualProtocol:
-    return VisualProtocol(
-        theme_palette=ThemePalette(
-            background="#000000",
-            primary_accent="#FFFFFF",
-            secondary_accent="#CCCCCC",
-            text_main="#FFFFFF",
-            text_muted="#999999",
-            highlight="#00FFFF",
-            warning="#FFAA00",
-            error="#FF0000",
-        ),
-        layout_blueprint=[
-            LayoutBlueprintItem(
-                id="root",
-                type="Frame",
-                position={"x": 0, "y": 0},
-                size={"width": 100, "height": 100},
-                style={"opacity": 1},
-            )
-        ],
-        marks_definition={"start": 0},
-        animation_formulas="fade in",
-    )
+        return SimpleNamespace(config={"configurable": {"checkpoint_id": "cp-1"}}, values={})
 
 
 class RefactorTests(unittest.TestCase):
-    def setUp(self):
-        self.client = TestClient(app_main.app)
+    def _collect_sse(self, workflow_name: str, initial_state: dict) -> list[str]:
+        async def _runner():
+            chunks = []
+            async for chunk in stream_workflow_response(workflow_name, initial_state, build_run_config("test-thread")):
+                chunks.append(chunk)
+            return chunks
+
+        return asyncio.run(_runner())
 
     def test_generate_script_sse_returns_setup_updates_end(self):
         with patch("services.workflow_service.resolve_workflow", return_value=AsyncWorkflowSuccess()):
-            response = self.client.post("/api/generate_script_sse", json={"source_text": "hello"})
+            chunks = self._collect_sse("conversational_tone", build_conversational_initial_state("hello"))
 
-        self.assertEqual(response.status_code, 200)
-        payloads = parse_sse_payloads(response.text)
-        self.assertEqual([payload["type"] for payload in payloads], ["setup", "updates", "end"])
-        self.assertEqual(len({payload["request_id"] for payload in payloads}), 1)
+        self.assertIn('"type": "setup"', chunks[0])
+        self.assertIn('"type": "end"', chunks[-1])
 
-    def test_generate_script_sse_returns_error_event(self):
+    def test_generate_script_sse_returns_error_end_status(self):
         with patch("services.workflow_service.resolve_workflow", return_value=AsyncWorkflowError()):
-            response = self.client.post("/api/generate_script_sse", json={"source_text": "hello"})
+            chunks = self._collect_sse("conversational_tone", build_conversational_initial_state("hello"))
 
-        self.assertEqual(response.status_code, 200)
-        payloads = parse_sse_payloads(response.text)
-        self.assertEqual([payload["type"] for payload in payloads], ["setup", "error", "end"])
-        self.assertEqual(payloads[1]["message"], "boom")
+        self.assertIn('"type": "error"', chunks[-2])
+        self.assertIn('"status": "error"', chunks[-1])
 
-    def test_writer_and_reviewer_use_distinct_roles(self):
-        self.assertEqual(content_writer_agent["model_role"], "writer")
-        self.assertEqual(content_reviewer_agent["model_role"], "reviewer")
-        self.assertIsNot(get_model("writer"), get_model("reviewer"))
+    def test_conversational_initial_state_uses_source_text(self):
+        state = build_conversational_initial_state("hello")
+        self.assertEqual(state["source_text"], "hello")
+        self.assertIsNone(state["oral_script_result"])
 
-    def test_animation_coder_failure_is_isolated(self):
-        task = CoderTaskState(
-            scene=Scene(
-                scene_id="scene-1",
-                script="line",
-                visual_design="design",
-                camera_language="camera",
-                visual_elements="elements",
-                visual_transition="transition",
-                emotion_rhythm="emotion",
-                code_render_model="react",
-                duration=4.5,
-                animation_marks={"start": 0},
-            ),
-            visual_architect=build_visual_protocol(),
+    def test_animation_initial_state_uses_oral_script(self):
+        state = build_animation_initial_state("oral script")
+        self.assertEqual(state["oral_script"], "oral script")
+        self.assertEqual(state["compile_config"]["fps"], 30)
+
+    def test_compiler_pipeline_generates_valid_scene_bundle(self):
+        parsed = parse_script("你有没有发现 AI 会突然变笨？明明问题很简单。")
+        scenes = build_scene_plan(parsed)
+        updated_scenes, marks = build_marks(scenes, fps=30)
+        layouts = compile_layouts(updated_scenes)
+        motions = compile_motions(updated_scenes, marks, layouts)
+        dsl_map = generate_dsl(updated_scenes, layouts, motions)
+        codes = generate_scene_code(dsl_map)
+
+        self.assertTrue(updated_scenes)
+        first_scene_id = updated_scenes[0].scene_id
+        validation = validate_scene_bundle(
+            first_scene_id,
+            LayoutSpec(**layouts[first_scene_id].model_dump()),
+            MotionSpec(**motions[first_scene_id].model_dump()),
+            RemotionDSL(**dsl_map[first_scene_id].model_dump()),
+            SceneCode(**codes[first_scene_id].model_dump()),
         )
+        self.assertEqual(validation.status, "pass")
+        self.assertIn("render(", codes[first_scene_id].code)
 
-        with patch.object(PromptManager, "get_langchain_messages", return_value=[]):
-            with patch.dict(animation_module.__dict__, {"coder_cache": SimpleCache()}):
-                with patch.dict(coder_module.coder_agent, {"model": RaisingStructuredModel()}):
-                    result = animation_module.coder_node(task, PromptManager())
-
-        self.assertEqual(result["coder"], [])
-        self.assertEqual(result["failed_scenes"], ["scene-1"])
-
-    def test_content_writer_cache_hits_on_same_input(self):
-        oral_content = f"same input {uuid.uuid4()}"
-        state = {
-            "oral_content": oral_content,
-            "current_script": "",
-            "review_score": None,
-            "last_feedback": None,
-            "loop_count": 0,
-            "last_action": None,
-        }
-        model = CountingInvokeModel("cached output")
-
-        with patch.dict(conversational_module.__dict__, {"writer_cache": SimpleCache()}):
-            with patch.dict(conversational_module.content_writer_agent, {"model": model}):
-                first = conversational_module.content_writer(state, PromptManager())
-                second = conversational_module.content_writer(state, PromptManager())
-
-        self.assertEqual(first["current_script"], "cached output")
-        self.assertEqual(second["current_script"], "cached output")
-        self.assertEqual(model.calls, 1)
-
-    def test_qa_guard_marks_failed_scene_without_dropping_code(self):
-        task = CoderTaskState(
-            scene=Scene(
-                scene_id="scene-qa",
-                script="line",
-                visual_design="design",
-                camera_language="camera",
-                visual_elements="elements",
-                visual_transition="transition",
-                emotion_rhythm="emotion",
-                code_render_model="react",
-                duration=4.5,
-                animation_marks={"start": 0},
-            ),
-            visual_architect=build_visual_protocol(),
-        )
-        coder_result = SimpleNamespace(scene_id="scene-qa", code="render(<Scene />);")
-
-        class SuccessfulCoderModel:
-            def with_structured_output(self, schema):
-                return self
-
-            def invoke(self, messages):
-                return coder_result
-
-        with patch.object(PromptManager, "get_langchain_messages", return_value=[]):
-            with patch.dict(animation_module.__dict__, {"coder_cache": SimpleCache(), "qa_cache": SimpleCache()}):
-                with patch.dict(coder_module.coder_agent, {"model": SuccessfulCoderModel()}):
-                    with patch.dict(qa_module.qa_guard_agent, {"model": FailingStructuredModel()}):
-                        result = animation_module.coder_node(task, PromptManager())
-
-        self.assertEqual(len(result["coder"]), 1)
-        self.assertEqual(result["coder"][0].scene_id, "scene-qa")
-        self.assertEqual(result["coder"][0].code, "render(<Scene />);")
-        self.assertEqual(result["failed_scenes"], ["scene-qa"])
-
-    def test_dispatch_coders_preserves_visual_architect_payload(self):
-        state = {
-            "script": "demo",
-            "director": {
-                "scenes": [
-                    {"scene_id": "scene-1", "script": "a"},
-                    {"scene_id": "scene-2", "script": "b"},
-                ]
-            },
-            "visual_architect": build_visual_protocol().model_dump(),
-            "coder": [],
-            "failed_scenes": [],
-            "max_parallel_coders": 4,
-            "last_action": None,
-        }
-
-        sends = animation_module.dispatch_coders(state)
-
-        self.assertEqual(len(sends), 2)
-        for send in sends:
-            self.assertIsNotNone(send.arg["visual_architect"])
-
-    def test_invoke_structured_falls_back_to_raw_json(self):
-        class DemoSchema(content_reviewer_agent["response_format"]):
-            pass
-
-        model = MethodSensitiveStructuredModel('{"score": 88, "feedback": "ok"}')
-        result = invoke_structured(
-            model=model,
-            schema=DemoSchema,
-            messages=[],
-            operation="test_fallback",
-        )
-
-        self.assertEqual(result.score, 88)
-        self.assertEqual(result.feedback, "ok")
-
-
-if __name__ == "__main__":
-    unittest.main()
+    def test_marks_are_monotonic(self):
+        parsed = parse_script("第一句。第二句。第三句。")
+        scenes = build_scene_plan(parsed)
+        updated_scenes, marks = build_marks(scenes, fps=30)
+        starts = [scene.start for scene in updated_scenes]
+        self.assertEqual(starts, sorted(starts))
+        self.assertEqual(marks.global_marks[updated_scenes[0].scene_id], 0)

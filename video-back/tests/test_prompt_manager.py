@@ -1,3 +1,8 @@
+import sys
+from pathlib import Path
+
+sys.path.append(str(Path(__file__).resolve().parents[1]))
+
 from agents.coder import example as coder_example
 from prompts.manager import PromptManager
 
