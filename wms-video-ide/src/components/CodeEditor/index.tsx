@@ -5,7 +5,6 @@ import {
   AlertTriangle,
   ChevronDown,
   ChevronRight,
-  Code2,
   History,
   ListTodo,
   RefreshCw,
@@ -14,6 +13,9 @@ import {
 } from 'lucide-react';
 import { useIdeStore } from '../../store/useIdeStore';
 import { selectActiveScene } from '../../store/selectors';
+import type { ArtifactTab } from '../../store/useIdeStore';
+import { ArtifactViewer } from '../ArtifactViewer';
+import { ValidationPanel } from '../ValidationPanel';
 import type { WorkflowHistoryItem, WorkflowName } from '../../types/workflow';
 import {
   formatWorkflowAction,
@@ -117,6 +119,7 @@ export const CodeEditor: React.FC = () => {
   const setHistoryItems = useIdeStore((s) => s.setHistoryItems);
   const setHistoryWorkflow = useIdeStore((s) => s.setHistoryWorkflow);
   const setWorkflowProgress = useIdeStore((s) => s.setWorkflowProgress);
+  const applyArtifacts = useIdeStore((s) => s.updateArtifacts);
   const resetWorkflowProgress = useIdeStore((s) => s.resetWorkflowProgress);
   const loadHistory = useIdeStore((s) => s.loadHistory);
   const scriptBaseline = useIdeStore((s) => s.scriptBaseline);
@@ -124,7 +127,9 @@ export const CodeEditor: React.FC = () => {
   const captureScriptBaseline = useIdeStore((s) => s.captureScriptBaseline);
   const captureAnimationBaseline = useIdeStore((s) => s.captureAnimationBaseline);
 
-  const [activeTab, setActiveTab] = useState<PanelTab>('progress');
+  const activeTab = useIdeStore((s) => s.activeTab);
+  const setActiveTab = useIdeStore((s) => s.setActiveTab);
+  const [panelTab, setPanelTab] = useState<PanelTab>('progress');
   const [elapsedMs, setElapsedMs] = useState(0);
   const [statusPanelHeight, setStatusPanelHeight] = useState(368);
   const [isResizingStatusPanel, setIsResizingStatusPanel] = useState(false);
@@ -219,7 +224,7 @@ export const CodeEditor: React.FC = () => {
 
   useEffect(() => {
     logsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [processLogs, activeTab]);
+  }, [processLogs, panelTab]);
 
   useEffect(() => {
     if (!selectedWorkflow && availableWorkflows.length > 0) {
@@ -319,31 +324,54 @@ export const CodeEditor: React.FC = () => {
       addProcessLog(`${logPrefix}：${formatWorkflowAction('animation', nodeName)}`);
       markWorkflowNode('animation', nodeName, 'success');
 
-      if (nodeName === 'director_node' && nodeData.director?.scenes) {
-        const parsedScenes = nodeData.director.scenes.map((scene: any) => ({
+      if (nodeName === 'parse_oral_script_node' && nodeData.parsed_script) {
+        applyArtifacts({ parsedScript: nodeData.parsed_script });
+      }
+
+      if (nodeName === 'plan_scenes_node' && nodeData.scenes) {
+        applyArtifacts({ scenePlan: nodeData.scenes });
+      }
+
+      if (nodeName === 'generate_marks_node' && nodeData.scenes) {
+        applyArtifacts({ marks: nodeData.marks });
+        const parsedScenes = nodeData.scenes.map((scene: any) => ({
           id: scene.scene_id,
-          durationInFrames: Math.ceil((scene.duration || 5) * 30),
+          durationInFrames: scene.duration_in_frames || Math.ceil(((scene.end || 30) - (scene.start || 0))),
           componentType: scene.scene_id.replace(/\s+/g, ''),
-          script: scene.script,
-          visual_design: scene.visual_design,
-          marks: scene.animation_marks || {},
-          code:
-            '// Waiting for regenerated scene code.\n// Visual design:\n// ' +
-            scene.visual_design,
+          script: scene.text,
+          visual_design: scene.visual_goal || '',
+          marks: nodeData.marks?.scene_marks?.[scene.scene_id] || {},
+          code: '// Waiting for regenerated scene code.',
         }));
         setScenes(parsedScenes);
         addProcessLog(`已生成 ${parsedScenes.length} 个镜头。`);
       }
 
-      if (nodeName === 'coder_node' && nodeData.coder) {
-        const coders = Array.isArray(nodeData.coder) ? nodeData.coder : [nodeData.coder];
-        coders.forEach((coder: any) => {
+      if (nodeName === 'compile_layout_node' && nodeData.layouts) {
+        applyArtifacts({ layouts: nodeData.layouts });
+      }
+
+      if (nodeName === 'compile_motion_node' && nodeData.motions) {
+        applyArtifacts({ motions: nodeData.motions });
+      }
+
+      if (nodeName === 'generate_dsl_node' && nodeData.dsl) {
+        applyArtifacts({ dsl: nodeData.dsl });
+      }
+
+      if ((nodeName === 'generate_scene_code_node' || nodeName === 'repair_scene_node') && nodeData.codes) {
+        applyArtifacts({ codes: nodeData.codes });
+        Object.values(nodeData.codes).forEach((coder: any) => {
           updateSceneCode(coder.scene_id, coder.code);
           addProcessLog(`代码已更新：${coder.scene_id}`);
         });
       }
+
+      if (nodeData.validations) {
+        applyArtifacts({ validations: nodeData.validations });
+      }
     },
-    [addProcessLog, markWorkflowNode, setScenes, updateSceneCode]
+    [addProcessLog, applyArtifacts, markWorkflowNode, setScenes, updateSceneCode]
   );
 
   const handleChange = useCallback(
@@ -424,7 +452,7 @@ export const CodeEditor: React.FC = () => {
       if (!confirmed) return;
 
       setProcessStartTime(Date.now());
-      setActiveTab('progress');
+      setPanelTab('progress');
       const workflowLabel = getWorkflowLabel(workflow);
       setWorkflowProgress(workflow, {
         status: 'running',
@@ -465,6 +493,13 @@ export const CodeEditor: React.FC = () => {
             throw new Error(payload.message || '恢复并重新生成失败');
           }
 
+          if (payload.type === 'end') {
+            if (payload.status === 'error') {
+              throw new Error(payload.progress?.description || '恢复并重新生成失败');
+            }
+            return;
+          }
+
           if (payload.type === 'setup') {
             setWorkflowProgress(workflow, {
               status: 'running',
@@ -491,6 +526,19 @@ export const CodeEditor: React.FC = () => {
 
               if (nodeData.current_script) {
                 setOralScript(nodeData.current_script);
+              }
+
+              if (nodeName === 'finalize_oral_script_node' && nodeData.oral_script_result?.oral_script) {
+                setOralScript(nodeData.oral_script_result.oral_script);
+                applyArtifacts({
+                  parsedScript: {
+                    source_id: 'oral-script',
+                    intent: 'oral_script',
+                    tone: nodeData.oral_script_result.script_metadata?.tone || 'conversational',
+                    emotion_curve: [],
+                    segments: nodeData.oral_script_result.script_segments || [],
+                  },
+                });
               }
             } else {
               applyAnimationUpdate(updateData, '恢复后完成阶段');
@@ -551,7 +599,7 @@ export const CodeEditor: React.FC = () => {
   const retryRewrite = useCallback(async () => {
     setRewriteStatus('generating');
     setAiStatus('idle');
-    setActiveTab('progress');
+    setPanelTab('progress');
     setProcessStartTime(Date.now());
     setWorkflowProgress('conversational_tone', {
       status: 'running',
@@ -576,6 +624,13 @@ export const CodeEditor: React.FC = () => {
       await readSse(response, 'conversational_tone', (payload) => {
         if (payload.type === 'error') {
           throw new Error(payload.message || '口播稿重试失败');
+        }
+
+        if (payload.type === 'end') {
+          if (payload.status === 'error') {
+            throw new Error(payload.progress?.description || '口播稿重试失败');
+          }
+          return;
         }
 
         if (payload.type === 'setup') {
@@ -603,6 +658,19 @@ export const CodeEditor: React.FC = () => {
           if (nodeData.current_script) {
             setOralScript(nodeData.current_script);
             addProcessLog('已收到最新口播稿。', nodeData.current_script);
+          }
+
+          if (nodeName === 'finalize_oral_script_node' && nodeData.oral_script_result?.oral_script) {
+            setOralScript(nodeData.oral_script_result.oral_script);
+            applyArtifacts({
+              parsedScript: {
+                source_id: 'oral-script',
+                intent: 'oral_script',
+                tone: nodeData.oral_script_result.script_metadata?.tone || 'conversational',
+                emotion_curve: [],
+                segments: nodeData.oral_script_result.script_segments || [],
+              },
+            });
           }
         }
       });
@@ -643,7 +711,7 @@ export const CodeEditor: React.FC = () => {
   const retryVideo = useCallback(async () => {
     setAiStatus('generating');
     setRewriteStatus('idle');
-    setActiveTab('progress');
+    setPanelTab('progress');
     setProcessStartTime(Date.now());
     setWorkflowProgress('animation', {
       status: 'running',
@@ -658,16 +726,23 @@ export const CodeEditor: React.FC = () => {
       const response = await fetch('/api/generate_animation_sse', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ source_text: oralScript, thread_id: animationThreadId }),
+        body: JSON.stringify({ oral_script: oralScript, thread_id: animationThreadId }),
       });
 
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
 
-      await readSse(response, 'animation', (payload) => {
-        if (payload.type === 'error') {
-          throw new Error(payload.message || '分镜重试失败');
+        await readSse(response, 'animation', (payload) => {
+          if (payload.type === 'error') {
+            throw new Error(payload.message || '分镜重试失败');
+          }
+
+        if (payload.type === 'end') {
+          if (payload.status === 'error') {
+            throw new Error(payload.progress?.description || '分镜重试失败');
+          }
+          return;
         }
 
         if (payload.type === 'setup') {
@@ -687,7 +762,7 @@ export const CodeEditor: React.FC = () => {
 
           applyAnimationUpdate(updateData);
         }
-      });
+        });
 
       addProcessLog('分镜与代码重试完成。');
       setWorkflowProgress('animation', {
@@ -729,46 +804,62 @@ export const CodeEditor: React.FC = () => {
 
   return (
     <div className="flex w-[42%] flex-col bg-[#1e1e1e]">
-      <div className="flex flex-shrink-0 items-center justify-between border-b border-gray-800 bg-[#18181b] px-4 py-3">
-        <div className="flex items-center gap-2">
-          <Code2 className="h-4 w-4 text-blue-400" />
-          <span className="text-xs font-semibold text-gray-300">
-            {hasScenes ? 'GeneratedScene.tsx' : '代码编辑区'}
-          </span>
+      <div className="flex flex-shrink-0 items-center border-b border-gray-800 bg-[#18181b] px-2 py-2">
+        <div className="flex flex-wrap gap-1">
+          {(['code', 'validation', 'layout', 'motion', 'dsl', 'marks', 'scenes', 'script'] as ArtifactTab[]).map(
+            (tab) => (
+              <button
+                key={tab}
+                onClick={() => setActiveTab(tab)}
+                className={`rounded px-3 py-1.5 text-[11px] font-medium transition-colors ${
+                  activeTab === tab
+                    ? 'bg-blue-500/10 text-blue-400 border border-blue-500/20'
+                    : 'text-gray-400 hover:bg-gray-800 hover:text-gray-200'
+                }`}
+              >
+                {tab.toUpperCase()}
+              </button>
+            )
+          )}
         </div>
-        <span className="text-[11px] text-gray-500">
-          {hasScenes ? activeScene.componentType || '当前镜头' : '等待步骤 2 完成'}
-        </span>
       </div>
 
       <div className="min-h-0 flex-1 border-b border-gray-800">
         {!hasScenes ? (
           <div className="flex h-full items-center justify-center bg-[#111113] px-6">
             <div className="max-w-[260px] text-center">
-              <p className="text-sm text-gray-300">完成步骤 2 后，这里会显示当前镜头的代码。</p>
-              <p className="mt-2 text-[12px] text-gray-500">
-                只有拿到真实分镜后才开放编辑，避免示例内容干扰判断。
-              </p>
+              <p className="text-sm text-gray-300">完成步骤 2 后，这里会显示编译产物。</p>
             </div>
           </div>
         ) : (
-          <Editor
-            height="100%"
-            defaultLanguage="typescript"
-            theme="vs-dark"
-            value={activeScene.code}
-            onChange={handleChange}
-            onMount={handleEditorMount}
-            options={{
-              minimap: { enabled: false },
-              fontSize: 13,
-              fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
-              wordWrap: 'on',
-              padding: { top: 16 },
-              smoothScrolling: true,
-              scrollBeyondLastLine: false,
-            }}
-          />
+          <div className="h-full">
+            {activeTab === 'code' && (
+              <Editor
+                height="100%"
+                defaultLanguage="typescript"
+                theme="vs-dark"
+                value={activeScene.code}
+                onChange={handleChange}
+                onMount={handleEditorMount}
+                options={{
+                  minimap: { enabled: false },
+                  fontSize: 13,
+                  fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
+                  wordWrap: 'on',
+                  padding: { top: 16 },
+                  smoothScrolling: true,
+                  scrollBeyondLastLine: false,
+                }}
+              />
+            )}
+            {activeTab === 'validation' && <ValidationPanel />}
+            {activeTab === 'layout' && <ArtifactViewer label="Layout" artifact={useIdeStore.getState().layouts[activeSceneId]} />}
+            {activeTab === 'motion' && <ArtifactViewer label="Motion" artifact={useIdeStore.getState().motions[activeSceneId]} />}
+            {activeTab === 'dsl' && <ArtifactViewer label="DSL" artifact={useIdeStore.getState().dsl[activeSceneId]} />}
+            {activeTab === 'marks' && <ArtifactViewer label="Marks" artifact={useIdeStore.getState().marks} />}
+            {activeTab === 'scenes' && <ArtifactViewer label="Scenes" artifact={useIdeStore.getState().scenePlan} />}
+            {activeTab === 'script' && <ArtifactViewer label="Script" artifact={useIdeStore.getState().parsedScript} />}
+          </div>
         )}
       </div>
 
@@ -838,9 +929,9 @@ export const CodeEditor: React.FC = () => {
               return (
                 <button
                   key={tab}
-                  onClick={() => setActiveTab(tab)}
+                  onClick={() => setPanelTab(tab)}
                   className={`flex min-h-10 items-center gap-1 rounded border px-3 py-2 text-[11px] transition-colors ${
-                    activeTab === tab
+                    panelTab === tab
                       ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300'
                       : 'border-gray-800 text-gray-500 hover:text-gray-300'
                   }`}
@@ -854,7 +945,7 @@ export const CodeEditor: React.FC = () => {
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto p-3 text-xs">
-          {activeTab === 'progress' && selectedWorkflow && selectedProgress && (
+          {panelTab === 'progress' && selectedWorkflow && selectedProgress && (
             <div className="space-y-3">
               {availableWorkflows.length > 1 && (
                 <div className="flex gap-2">
@@ -947,7 +1038,7 @@ export const CodeEditor: React.FC = () => {
             </div>
           )}
 
-          {activeTab === 'history' && (
+          {panelTab === 'history' && (
             <div className="space-y-3">
               {availableWorkflows.length > 1 && (
                 <div className="flex gap-2">
@@ -1048,7 +1139,7 @@ export const CodeEditor: React.FC = () => {
             </div>
           )}
 
-          {activeTab === 'logs' && (
+          {panelTab === 'logs' && (
             <div className="space-y-2">
               {processLogs.length === 0 ? (
                 <div className="rounded border border-dashed border-gray-800 px-3 py-4 text-[12px] text-gray-500">

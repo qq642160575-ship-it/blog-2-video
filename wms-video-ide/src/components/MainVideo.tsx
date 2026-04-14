@@ -2,6 +2,8 @@ import React, { Component, useMemo } from 'react';
 import { Series, AbsoluteFill, useCurrentFrame, interpolate, spring, useVideoConfig } from 'remotion';
 import { LiveProvider, LiveError, LivePreview } from 'react-live';
 import type { Scene } from '../types/scene';
+import { useIdeStore } from '../store/useIdeStore';
+import { AlertCircle } from 'lucide-react';
 
 const CANVAS_WIDTH = 1080;
 const CANVAS_HEIGHT = 1920;
@@ -300,17 +302,75 @@ const EngineScene: React.FC<{ code: string; marks: Record<string, number>; scene
   );
 };
 
+// ── 验证失败降级 UI ───────────────────────────────────────────────────────────
+const ValidationFailedFallback: React.FC<{ sceneId: string; errors: any[] }> = ({ sceneId, errors }) => {
+  return (
+    <AbsoluteFill
+      style={{
+        backgroundColor: '#0f0f12',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: '24px',
+        border: '4px solid #7f1d1d',
+      }}
+    >
+      <div
+        style={{
+          background: '#1a0a0a',
+          border: '1px solid #dc2626',
+          borderRadius: '12px',
+          padding: '24px',
+          maxWidth: '80%',
+          textAlign: 'center',
+          boxShadow: '0 0 40px rgba(220, 38, 38, 0.2)',
+        }}
+      >
+        <AlertCircle size={48} color="#f87171" style={{ marginBottom: '16px' }} />
+        <div style={{ color: '#f87171', fontSize: '20px', fontWeight: 800, marginBottom: '8px' }}>
+          镜头编译校验失败
+        </div>
+        <div style={{ color: '#9ca3af', fontSize: '14px', marginBottom: '16px' }}>
+          场景 ID: {sceneId}
+        </div>
+        <div style={{ textAlign: 'left', background: '#000', padding: '12px', borderRadius: '6px', marginBottom: '16px' }}>
+          {errors.map((err, i) => (
+            <div key={i} style={{ color: '#fca5a5', fontSize: '12px', fontFamily: 'monospace', marginBottom: '4px' }}>
+              • [{err.code}] {err.message}
+            </div>
+          ))}
+        </div>
+        <div style={{ color: '#6b7280', fontSize: '12px' }}>
+          请开启右侧 Validation 面板查看详情或尝试“自动修复”。
+        </div>
+      </div>
+    </AbsoluteFill>
+  );
+};
+
 // ── 主视频容器 ────────────────────────────────────────────────────────────────
 export const MainVideo: React.FC<{ scenes: Scene[] }> = ({ scenes }) => {
+  const validations = useIdeStore((s) => s.validations);
+
   return (
     <Series>
-      {scenes.map((scene) => (
-        <Series.Sequence key={scene.id} durationInFrames={scene.durationInFrames}>
-          <SceneErrorBoundary sceneId={scene.id}>
-            <EngineScene code={scene.code} marks={scene.marks} sceneId={scene.id} />
-          </SceneErrorBoundary>
-        </Series.Sequence>
-      ))}
+      {scenes.map((scene) => {
+        const validation = validations[scene.id];
+        const isFailed = validation?.status === 'fail';
+
+        return (
+          <Series.Sequence key={scene.id} durationInFrames={scene.durationInFrames}>
+            <SceneErrorBoundary sceneId={scene.id}>
+              {isFailed ? (
+                <ValidationFailedFallback sceneId={scene.id} errors={validation.errors} />
+              ) : (
+                <EngineScene code={scene.code} marks={scene.marks} sceneId={scene.id} />
+              )}
+            </SceneErrorBoundary>
+          </Series.Sequence>
+        );
+      })}
     </Series>
   );
 };

@@ -27,6 +27,7 @@ type ServerProgress = {
 
 type SsePayload = {
   type: string;
+  status?: 'success' | 'partial_success' | 'error';
   message?: string;
   data?: Record<string, any>;
   thread_id?: string;
@@ -49,6 +50,7 @@ export const SourceInput: React.FC = () => {
   const setProcessStartTime = useIdeStore((s) => s.setProcessStartTime);
   const setScenes = useIdeStore((s) => s.setScenes);
   const updateSceneCode = useIdeStore((s) => s.updateSceneCode);
+  const updateArtifacts = useIdeStore((s) => s.updateArtifacts);
   const scriptThreadId = useIdeStore((s) => s.scriptThreadId);
   const animationThreadId = useIdeStore((s) => s.animationThreadId);
   const setScriptThreadContext = useIdeStore((s) => s.setScriptThreadContext);
@@ -181,22 +183,28 @@ export const SourceInput: React.FC = () => {
             setScriptThreadContext(payload.thread_id ?? scriptThreadId, payload.checkpoint_id);
           }
           setWorkflowProgress('conversational_tone', {
-            status: 'success',
-            description: '口播脚本生成完成，可以继续进入分镜阶段。',
+            status: payload.status === 'error' ? 'error' : 'success',
+            description:
+              payload.status === 'error'
+                ? '口播脚本生成失败，请重试。'
+                : '口播脚本生成完成，可以继续进入分镜阶段。',
             lastError: null,
           });
           addProcessLog('口播稿工作流结束。');
+          if (payload.status === 'error') {
+            throw new Error(payload.progress?.description || '口播稿生成失败');
+          }
           return;
         }
 
-        if (payload.type === 'error') {
-          setWorkflowProgress('conversational_tone', {
-            status: 'error',
-            description: '口播脚本生成失败，请检查网络或稍后重试。',
-            lastError: payload.message || '口播脚本生成失败',
-          });
-          throw new Error(payload.message || '口播稿生成失败');
-        }
+          if (payload.type === 'error') {
+            setWorkflowProgress('conversational_tone', {
+              status: 'error',
+              description: '口播脚本生成失败，请检查网络或稍后重试。',
+              lastError: payload.message || '口播脚本生成失败',
+            });
+            throw new Error(payload.message || '口播稿生成失败');
+          }
 
         if (payload.type === 'updates' && payload.data) {
           let updateData = payload.data;
@@ -221,6 +229,20 @@ export const SourceInput: React.FC = () => {
           if (nodeData.current_script) {
             setOralScript(nodeData.current_script);
             addProcessLog('已收到最新口播稿。', nodeData.current_script);
+          }
+
+          if (nodeName === 'finalize_oral_script_node' && nodeData.oral_script_result) {
+            setOralScript(nodeData.oral_script_result.oral_script || '');
+            updateArtifacts({
+              parsedScript: {
+                source_id: 'oral-script',
+                intent: 'oral_script',
+                tone: nodeData.oral_script_result.script_metadata?.tone || 'conversational',
+                emotion_curve: [],
+                segments: nodeData.oral_script_result.script_segments || [],
+              },
+            });
+            addProcessLog('已生成结构化口语稿结果。');
           }
 
           if (nodeData.review_score !== undefined) {
@@ -269,7 +291,7 @@ export const SourceInput: React.FC = () => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          source_text: oralScript,
+          oral_script: oralScript,
           thread_id: animationThreadId,
         }),
       });
@@ -303,7 +325,23 @@ export const SourceInput: React.FC = () => {
               payload.checkpoint_id
             );
           }
-          addProcessLog('视频工作流结束。');
+          setWorkflowProgress('animation', {
+            status: payload.status === 'error' ? 'error' : 'success',
+            description:
+              payload.status === 'partial_success'
+                ? '部分镜头生成失败，但其余结果已可预览。'
+                : payload.status === 'error'
+                  ? '视频工作流失败，请检查日志后重试。'
+                  : '视频工作流结束。',
+            lastError:
+              payload.status === 'error' ? payload.progress?.description || '视频生成失败' : null,
+          });
+          addProcessLog(
+            payload.status === 'partial_success' ? '视频工作流部分完成。' : '视频工作流结束。'
+          );
+          if (payload.status === 'error') {
+            throw new Error(payload.progress?.description || '视频生成失败');
+          }
           return;
         }
 
@@ -322,36 +360,71 @@ export const SourceInput: React.FC = () => {
           if (!nodeName || !nodeData) return;
 
           addProcessLog(`节点完成：${nodeName}`);
+          
+          if (nodeName === 'parse_oral_script_node' && nodeData.parsed_script) {
+             updateArtifacts({ parsedScript: nodeData.parsed_script });
+          }
+          
+          if (nodeName === 'plan_scenes_node' && nodeData.scenes) {
+             updateArtifacts({ scenePlan: nodeData.scenes });
+          }
 
-          if (nodeName === 'director_node' && nodeData.director?.scenes) {
-            const parsedScenes = nodeData.director.scenes.map((scene: any) => ({
+          if (nodeName === 'generate_marks_node' && nodeData.scenes) {
+            updateArtifacts({ marks: nodeData.marks });
+            const parsedScenes = nodeData.scenes.map((scene: any) => ({
               id: scene.scene_id,
-              durationInFrames: Math.ceil((scene.duration || 5) * 30),
+              durationInFrames: scene.duration_in_frames || ((scene.end || 30) - (scene.start || 0)),
               componentType: scene.scene_id.replace(/\s+/g, ''),
-              script: scene.script,
-              visual_design: scene.visual_design,
-              marks: scene.animation_marks || {},
-              code:
-                '// 正在等待 Coder Agent 生成代码...\n// 视觉设计要求：\n// ' +
-                scene.visual_design,
+              script: scene.text,
+              visual_design: scene.visual_goal || '',
+              marks: nodeData.marks?.scene_marks?.[scene.scene_id] || {},
+              code: '// 正在等待 Compiler 生成模板化代码...',
             }));
             setScenes(parsedScenes);
             addProcessLog(`已生成 ${parsedScenes.length} 个分镜。`);
           }
 
-          if (nodeName === 'visual_architect_node' && nodeData.visual_architect) {
+          if (nodeName === 'compile_layout_node' && nodeData.layouts) {
+            updateArtifacts({ layouts: nodeData.layouts });
             addProcessLog(
-              '已收到视觉主题配置。',
-              JSON.stringify(nodeData.visual_architect.theme_palette)
+              '已完成所有分镜的空间布局与安全区打包。',
+               JSON.stringify(Object.keys(nodeData.layouts))
             );
           }
+          
+          if (nodeName === 'compile_motion_node' && nodeData.motions) {
+            updateArtifacts({ motions: nodeData.motions });
+          }
 
-          if (nodeName === 'coder_node' && nodeData.coder) {
-            const coders = Array.isArray(nodeData.coder) ? nodeData.coder : [nodeData.coder];
-            coders.forEach((coder: any) => {
-              updateSceneCode(coder.scene_id, coder.code);
-              addProcessLog(`代码已返回：${coder.scene_id}`);
+          if (nodeName === 'generate_dsl_node' && nodeData.dsl) {
+            updateArtifacts({ dsl: nodeData.dsl });
+          }
+
+          if (nodeName === 'generate_scene_code_node' && nodeData.codes) {
+            const allCodes = nodeData.codes;
+            updateArtifacts({ codes: allCodes });
+            Object.keys(allCodes).forEach((sid) => {
+              updateSceneCode(sid, allCodes[sid].code);
+              addProcessLog(`模板化代码已生成：${sid}`);
             });
+          }
+          
+          if (nodeName === 'validate_scene_node' && nodeData.validations) {
+            updateArtifacts({ validations: nodeData.validations });
+          }
+          
+          if (nodeName === 'repair_scene_node') {
+            if (nodeData.layouts) updateArtifacts({ layouts: nodeData.layouts });
+            if (nodeData.motions) updateArtifacts({ motions: nodeData.motions });
+            if (nodeData.dsl) updateArtifacts({ dsl: nodeData.dsl });
+            if (nodeData.codes) {
+              updateArtifacts({ codes: nodeData.codes });
+              Object.keys(nodeData.codes).forEach((sid) => updateSceneCode(sid, nodeData.codes[sid].code));
+            }
+            if (nodeData.validations) updateArtifacts({ validations: nodeData.validations });
+            if (nodeData.failed_scenes?.length) {
+              addProcessLog(`遇到修复无法通过的失败节点: ${nodeData.failed_scenes.join(', ')}`);
+            }
           }
         }
       });

@@ -10,7 +10,35 @@ import {
 export type AiStatus = 'idle' | 'generating' | 'error';
 export type RewriteStatus = 'idle' | 'generating' | 'error' | 'success';
 
-export interface IdeState {
+import type { PipelineStage, PipelineError, ParsedScript } from '../types/pipeline';
+import type { SceneSpec, MarksSpec, LayoutSpec, MotionSpec, DslSpec, SceneCodeSpec, ValidationSpec } from '../types/artifacts';
+
+export interface ArtifactState {
+  parsedScript: ParsedScript | null;
+  scenePlan: SceneSpec[];
+  marks: MarksSpec | null;
+  layouts: Record<string, LayoutSpec>;
+  motions: Record<string, MotionSpec>;
+  dsl: Record<string, DslSpec>;
+  codes: Record<string, SceneCodeSpec>;
+  validations: Record<string, ValidationSpec>;
+}
+
+export type ArtifactTab = 'script' | 'scenes' | 'marks' | 'layout' | 'motion' | 'dsl' | 'code' | 'validation' | 'logs';
+
+export interface UiState {
+  activeTab: ArtifactTab;
+  selectedRecompileFrom: 'layout' | 'motion' | 'dsl' | 'code';
+  isDevMode: boolean;
+  expandedPanels: string[];
+}
+
+export interface PipelineState {
+  pipelineStage: PipelineStage;
+  lastError: PipelineError | null;
+}
+
+export interface IdeState extends PipelineState, ArtifactState, UiState {
   sourceText: string;
   oralScript: string;
   scenes: Scene[];
@@ -55,6 +83,10 @@ export interface IdeState {
   clearProcessLogs: () => void;
   setProcessStartTime: (time: number | null) => void;
   loadHistory: (workflow: WorkflowName) => Promise<void>;
+  setPipelineStage: (stage: PipelineStage) => void;
+  setPipelineError: (error: PipelineError | null) => void;
+  setActiveTab: (tab: ArtifactTab) => void;
+  updateArtifacts: (patch: Partial<ArtifactState>) => void;
 }
 
 const DEFAULT_SOURCE_TEXT =
@@ -92,6 +124,27 @@ const normalizeScene = (scene: Scene): Scene => {
 };
 
 export const useIdeStore = create<IdeState>((set, get) => ({
+  // PipelineState
+  pipelineStage: 'idle',
+  lastError: null,
+
+  // ArtifactState
+  parsedScript: null,
+  scenePlan: [],
+  marks: null,
+  layouts: {},
+  motions: {},
+  dsl: {},
+  codes: {},
+  validations: {},
+
+  // UiState
+  activeTab: 'progress' as const as ArtifactTab, // Fallback for backward compatibility
+  selectedRecompileFrom: 'layout',
+  isDevMode: true,
+  expandedPanels: [],
+
+  // legacy
   sourceText: DEFAULT_SOURCE_TEXT,
   oralScript: '',
   scenes: [],
@@ -122,6 +175,10 @@ export const useIdeStore = create<IdeState>((set, get) => ({
 
   setSourceText: (text) => set({ sourceText: text }),
   setOralScript: (text) => set({ oralScript: text }),
+  setPipelineStage: (stage) => set({ pipelineStage: stage }),
+  setPipelineError: (error) => set({ lastError: error }),
+  setActiveTab: (tab) => set({ activeTab: tab }),
+  updateArtifacts: (patch) => set((state) => ({ ...state, ...patch })),
   setScenes: (scenes) => {
     const normalizedScenes = scenes.map(normalizeScene);
     set({ scenes: normalizedScenes, activeSceneId: normalizedScenes[0]?.id ?? '' });

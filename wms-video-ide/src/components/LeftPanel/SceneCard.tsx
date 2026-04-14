@@ -1,7 +1,8 @@
 import React, { useCallback } from 'react';
-import { Clock } from 'lucide-react';
+import { Clock, AlertCircle } from 'lucide-react';
 import type { Scene } from '../../types/scene';
 import { DraggableMark } from './DraggableMark';
+import { useIdeStore } from '../../store/useIdeStore';
 
 interface SceneCardProps {
   index: number;
@@ -32,16 +33,22 @@ export const SceneCard: React.FC<SceneCardProps> = React.memo(
       onSelect(scene.id);
     }, [scene.id, onSelect]);
 
+    const validation = useIdeStore((s) => s.validations[scene.id]);
+    const isError = validation && validation.status === 'fail';
+
     return (
       <div
         onClick={handleClick}
         className={`relative flex cursor-pointer flex-col rounded-md border transition-all ${
           isActive
             ? 'border-violet-500/50 bg-violet-500/10'
-            : 'border-gray-800 bg-[#0e0e11] hover:border-gray-700'
+            : isError 
+              ? 'border-red-500/50 bg-red-500/5 hover:border-red-500/80' 
+              : 'border-gray-800 bg-[#0e0e11] hover:border-gray-700'
         }`}
       >
         {isActive && <div className="absolute bottom-0 left-0 top-0 w-0.5 bg-violet-500" />}
+        {isError && !isActive && <div className="absolute bottom-0 left-0 top-0 w-0.5 bg-red-500" />}
 
         <div className="px-3 pb-2 pt-3">
           <div className="mb-2 flex items-start justify-between gap-3">
@@ -62,6 +69,12 @@ export const SceneCard: React.FC<SceneCardProps> = React.memo(
                 {isTooLong && (
                   <span className="rounded bg-red-500/10 px-2 py-1 text-[11px] font-mono text-red-400">
                     文案超长
+                  </span>
+                )}
+                {isError && (
+                  <span className="flex items-center gap-1 rounded bg-red-500/10 px-2 py-1 text-[11px] font-mono text-red-400">
+                    <AlertCircle className="h-3 w-3" />
+                    验证失败
                   </span>
                 )}
               </div>

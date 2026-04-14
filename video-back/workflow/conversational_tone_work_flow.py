@@ -12,6 +12,7 @@ from agents.content_writer import Result as WriterResult
 from agents.content_writer import content_writer_agent
 from compiler.parser import parse_script
 from compiler.schemas import OralScriptResult
+from models.get_model import FallbackModel
 from prompts.manager import PromptManager
 from utils.cache import SimpleCache, build_cache_key
 from utils.logger import get_logger
@@ -63,9 +64,12 @@ def rewrite_oral_script_node(state: State, prompt_manager: PromptManager) -> Sta
     )
     result = writer_cache.get(cache_key, model_type=WriterResult)
     if result is None:
+        model = content_writer_agent["model"]
         try:
+            if isinstance(model, FallbackModel):
+                raise RuntimeError(model.reason)
             result = invoke_structured(
-                model=content_writer_agent["model"],
+                model=model,
                 schema=content_writer_agent["response_format"],
                 messages=messages,
                 operation=f"oral_script_rewrite:loop_{state['loop_count']}",
@@ -94,9 +98,12 @@ def review_oral_script_node(state: State, prompt_manager: PromptManager) -> Stat
     cache_key = build_cache_key("oral-script-review", state["current_script"])
     result = reviewer_cache.get(cache_key, model_type=ReviewerResult)
     if result is None:
+        model = content_reviewer_agent["model"]
         try:
+            if isinstance(model, FallbackModel):
+                raise RuntimeError(model.reason)
             result = invoke_structured(
-                model=content_reviewer_agent["model"],
+                model=model,
                 schema=content_reviewer_agent["response_format"],
                 messages=messages,
                 operation=f"oral_script_review:loop_{state['loop_count']}",

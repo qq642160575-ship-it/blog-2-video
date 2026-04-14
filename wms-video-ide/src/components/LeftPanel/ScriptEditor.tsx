@@ -15,6 +15,7 @@ export const ScriptEditor: React.FC<ScriptEditorProps> = ({ isOpen, onToggle }) 
   const updateSceneScript = useIdeStore((s) => s.updateSceneScript);
   const animationThreadId = useIdeStore((s) => s.animationThreadId);
   const updateSceneCode = useIdeStore((s) => s.updateSceneCode);
+  const updateArtifacts = useIdeStore((s) => s.updateArtifacts);
   const addProcessLog = useIdeStore((s) => s.addProcessLog);
   const setAiStatus = useIdeStore((s) => s.setAiStatus);
   const aiStatus = useIdeStore((s) => s.aiStatus);
@@ -49,7 +50,9 @@ export const ScriptEditor: React.FC<ScriptEditorProps> = ({ isOpen, onToggle }) 
     addProcessLog(`已保存镜头 ${activeScene.id} 的文案和视觉说明。`);
   };
 
-  const handleRegenerate = async () => {
+  const [recompileFrom, setRecompileFrom] = useState<'layout' | 'motion' | 'dsl' | 'code'>('layout');
+
+  const handleRegenerate = async (from: 'layout'|'motion'|'dsl'|'code' = recompileFrom) => {
     if (!activeScene.id) return;
 
     updateSceneScript(activeScene.id, draftScript, draftDesign);
@@ -69,8 +72,8 @@ export const ScriptEditor: React.FC<ScriptEditorProps> = ({ isOpen, onToggle }) 
         body: JSON.stringify({
           thread_id: animationThreadId,
           scene_id: activeScene.id,
-          script: draftScript,
-          visual_design: draftDesign,
+          oral_script: draftScript,
+          recompile_from: from,
         }),
       });
 
@@ -82,6 +85,13 @@ export const ScriptEditor: React.FC<ScriptEditorProps> = ({ isOpen, onToggle }) 
       await readSse(response, (payload) => {
         if (payload.type === 'error') {
           throw new Error(payload.message || '局部重算失败');
+        }
+
+        if (payload.type === 'end') {
+          if (payload.status === 'error') {
+            throw new Error(payload.progress?.description || '局部重算失败');
+          }
+          return;
         }
 
         if (payload.type === 'updates' && payload.data) {
@@ -96,14 +106,31 @@ export const ScriptEditor: React.FC<ScriptEditorProps> = ({ isOpen, onToggle }) 
 
           addProcessLog(`局部重算完成节点：${nodeName}`);
 
-          if (nodeName === 'coder_node' && nodeData.coder) {
-            const coders = Array.isArray(nodeData.coder) ? nodeData.coder : [nodeData.coder];
-            coders.forEach((coder: any) => {
-              if (coder.scene_id === activeScene.id) {
-                updateSceneCode(coder.scene_id, coder.code);
-                addProcessLog(`已更新镜头 ${coder.scene_id} 的代码。`);
+          if (nodeName === 'compile_layout_node' && nodeData.layouts) {
+            updateArtifacts({ layouts: nodeData.layouts });
+          }
+
+          if (nodeName === 'compile_motion_node' && nodeData.motions) {
+            updateArtifacts({ motions: nodeData.motions });
+          }
+
+          if (nodeName === 'generate_dsl_node' && nodeData.dsl) {
+            updateArtifacts({ dsl: nodeData.dsl });
+          }
+
+          if ((nodeName === 'generate_scene_code_node' || nodeName === 'repair_scene_node') && nodeData.codes) {
+            const allCodes = nodeData.codes;
+            updateArtifacts({ codes: allCodes });
+            Object.keys(allCodes).forEach((sid) => {
+              if (sid === activeScene.id) {
+                updateSceneCode(sid, allCodes[sid].code);
+                addProcessLog(`已更新镜头 ${sid} 的重新编译代码。`);
               }
             });
+          }
+
+          if (nodeData.validations) {
+            updateArtifacts({ validations: nodeData.validations });
           }
         }
       });
@@ -186,30 +213,44 @@ export const ScriptEditor: React.FC<ScriptEditorProps> = ({ isOpen, onToggle }) 
             </div>
           </div>
 
-          <div className="flex items-center justify-between gap-3 rounded border border-gray-800 bg-[#111113] px-3 py-2">
+          <div className="flex flex-col gap-2 rounded border border-gray-800 bg-[#111113] px-3 py-2">
             <p className="text-[12px] text-gray-500">
-              先保存文案，再决定是否重算当前镜头代码。
+              先保存文案，再选择进行对应级别的重算。不同的重算会经过不同的节点。
             </p>
             <div className="flex items-center gap-2">
               <button
                 onClick={applyChanges}
                 disabled={!isDirty || isGenerating}
-                className="flex min-h-11 items-center gap-1.5 rounded border border-gray-700 px-3 py-2 text-[12px] text-gray-200 transition-colors hover:bg-gray-800 disabled:opacity-50"
+                className="flex items-center gap-1.5 rounded border border-gray-700 px-3 py-1.5 text-[11px] text-gray-200 transition-colors hover:bg-gray-800 disabled:opacity-50"
               >
-                <Save className="h-3.5 w-3.5" />
-                保存修改
+                <Save className="h-3 w-3" />
+                仅保存草稿
               </button>
+              
+              <div className="h-4 w-[1px] bg-gray-700 mx-1"></div>
+
+              <select
+                value={recompileFrom}
+                onChange={(e) => setRecompileFrom(e.target.value as any)}
+                className="bg-gray-800 text-gray-200 border border-gray-700 rounded px-2 py-1 text-[11px] outline-none"
+              >
+                <option value="layout">从 Layout 重算</option>
+                <option value="motion">从 Motion 重算</option>
+                <option value="dsl">从 DSL 重算</option>
+                <option value="code">仅重新生成 Code</option>
+              </select>
+
               <button
-                onClick={handleRegenerate}
+                onClick={() => handleRegenerate(recompileFrom)}
                 disabled={isGenerating || !draftScript.trim()}
-                className="flex min-h-11 items-center gap-1.5 rounded bg-violet-600 px-3 py-2 text-[12px] font-semibold text-white transition-colors hover:bg-violet-500 disabled:opacity-50"
+                className="flex items-center gap-1.5 rounded bg-violet-600 px-3 py-1.5 text-[11px] font-semibold text-white transition-colors hover:bg-violet-500 disabled:opacity-50"
               >
                 {isGenerating ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  <Loader2 className="h-3 w-3 animate-spin" />
                 ) : (
-                  <RefreshCw className="h-3.5 w-3.5" />
+                  <RefreshCw className="h-3 w-3" />
                 )}
-                保存并重算当前镜头
+                执行重算
               </button>
             </div>
           </div>
