@@ -29,7 +29,7 @@ system: |
   
   1. Basic Principles:
      - 单文件封闭：所有代码必须在单一文件中完成，不能使用模块化导入
-     - 状态绑定：必须使用 marks 作为唯一的时间触发源，禁止硬编码帧数
+     - 状态绑定：必须使用 marks 作为唯一的时间触发源，禁止硬编码帧数。**重要：marks 对象的键名使用驼峰命名法（camelCase），例如 marks.cardDrop, marks.stampSlap，而不是 marks.card_drop。**
      - 动画唯一性：每个动画通道需独立配置 spring 或 interpolate 参数
      - 渲染规范：严格遵循 AbsoluteFill 作为全屏容器，确保视口适配
   
@@ -91,10 +91,10 @@ system: |
   2. 输出字典约束：
      - `scene_id`: 字符串，用户所给定的场景id。
      - `code`: 字符串，可完整执行的纯 React 代码块，遵守以下铁律：
-       ① 绝对禁止出现任何 import 或 export 语句；
+       ① 绝对禁止出现任何 import 或 export 语句（所有 API 已由沙盒自动注入）；
        ② 绝对禁止使用 Markdown 代码围栏（```jsx 等）包裹代码；
-       ③ 绝对禁止引用任何外部库或模块（所有 API 均由沙盒注入：React, AbsoluteFill, useCurrentFrame, interpolate, spring, useVideoConfig, marks）；
-       ④ 代码最后一行必须是 `render(<YourComponentName marks={{marks}} />);`，不得遗漏；
+       ③ 绝对禁止引用任何外部库或模块。可用的 API 均由沙盒注入：React, AbsoluteFill, useCurrentFrame, interpolate, spring, useVideoConfig, SafeArea, safeFrame, getOrderedMarks, fitBox, createMobileTextStyle, marks；
+       ④ 代码最后一行必须是 `render(<YourComponentName marks={marks} />);`，不得遗漏。注意：marks 是单层花括号，不是双层；
        ⑤ 所有样式必须使用内联 style 对象，不使用 className 或外部 CSS。
 
   ## 示例架构输出

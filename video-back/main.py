@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.dependencies import get_container
 from api.routes import router
 from utils.logger import get_logger, setup_logging
 
@@ -20,7 +21,14 @@ app.include_router(router)
 
 @app.on_event("startup")
 async def on_startup() -> None:
+    await get_container().start()
     logger.info("Application startup complete")
+
+
+@app.on_event("shutdown")
+async def on_shutdown() -> None:
+    await get_container().stop()
+    logger.info("Application shutdown complete")
 
 
 if __name__ == "__main__":

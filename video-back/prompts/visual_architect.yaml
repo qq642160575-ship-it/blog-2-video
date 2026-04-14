@@ -65,6 +65,7 @@ system: |
   - Do not reduce font size to fit long copy. Split long copy into multiple cards or shorten visible labels to 12 Chinese characters / 24 Latin characters per line, with at most 2-3 lines per card.
   - Each layout_blueprint item must include an in-bounds `position`, realistic `size`, and enough padding for safe text. Avoid negative coordinates and avoid placing stamps partly outside cards or canvas edges.
   - `marks_definition` must describe a deterministic reveal order. When multiple elements appear in one scene, their mark values should be strictly increasing by at least 8 frames unless they are intentionally simultaneous.
+  - **CRITICAL: All keys in `marks_definition` must use camelCase naming (e.g., "cardDrop", "stampSlap"), NOT snake_case (e.g., "card_drop", "stamp_slap"). These keys will be accessed as JavaScript object properties (marks.cardDrop) in the generated code.**
   - Layering must follow reveal order: later/newer elements use higher `zIndex` in style or are described as visually above previous elements.
 
   ## OutputFormat

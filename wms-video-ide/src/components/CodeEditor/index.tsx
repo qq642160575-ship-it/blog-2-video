@@ -12,9 +12,16 @@ import {
   RotateCcw,
   TerminalSquare,
 } from 'lucide-react';
+import { listBranchArtifacts } from '../../api/artifacts';
+import { openGenerateScriptSse } from '../../api/compat';
+import { getSessionTimeline } from '../../api/sessions';
+import { cancelTask, retryTask } from '../../api/tasks';
 import { useIdeStore } from '../../store/useIdeStore';
 import { selectActiveScene } from '../../store/selectors';
-import type { WorkflowHistoryItem, WorkflowName } from '../../types/workflow';
+import type { ArtifactResponse } from '../../types/artifact';
+import type { TaskEventRecord } from '../../types/event';
+import type { WorkflowName } from '../../types/workflow';
+import { readSse } from '../../utils/sse';
 import {
   formatWorkflowAction,
   getNodePresentation,
@@ -25,7 +32,7 @@ type PanelTab = 'progress' | 'history' | 'logs';
 
 const panelTabLabel: Record<PanelTab, string> = {
   progress: '当前进度',
-  history: '历史检查点',
+  history: '任务历史',
   logs: '执行日志',
 };
 
@@ -93,41 +100,37 @@ export const CodeEditor: React.FC = () => {
   const updateSceneCode = useIdeStore((s) => s.updateSceneCode);
   const processLogs = useIdeStore((s) => s.processLogs);
   const processStartTime = useIdeStore((s) => s.processStartTime);
+  const currentSessionId = useIdeStore((s) => s.currentSessionId);
+  const currentBranchId = useIdeStore((s) => s.currentBranchId);
+  const activeAnimationTaskId = useIdeStore((s) => s.activeAnimationTaskId);
+  const activeAnimationTaskStatus = useIdeStore((s) => s.activeAnimationTaskStatus);
+  const taskEventsByTaskId = useIdeStore((s) => s.taskEventsByTaskId);
   const rewriteStatus = useIdeStore((s) => s.rewriteStatus);
   const aiStatus = useIdeStore((s) => s.aiStatus);
   const sourceText = useIdeStore((s) => s.sourceText);
-  const oralScript = useIdeStore((s) => s.oralScript);
   const setRewriteStatus = useIdeStore((s) => s.setRewriteStatus);
   const setAiStatus = useIdeStore((s) => s.setAiStatus);
   const addProcessLog = useIdeStore((s) => s.addProcessLog);
   const clearProcessLogs = useIdeStore((s) => s.clearProcessLogs);
   const setProcessStartTime = useIdeStore((s) => s.setProcessStartTime);
   const setOralScript = useIdeStore((s) => s.setOralScript);
-  const setScenes = useIdeStore((s) => s.setScenes);
   const scriptThreadId = useIdeStore((s) => s.scriptThreadId);
-  const scriptCheckpointId = useIdeStore((s) => s.scriptCheckpointId);
   const animationThreadId = useIdeStore((s) => s.animationThreadId);
-  const animationCheckpointId = useIdeStore((s) => s.animationCheckpointId);
   const setScriptThreadContext = useIdeStore((s) => s.setScriptThreadContext);
   const setAnimationThreadContext = useIdeStore((s) => s.setAnimationThreadContext);
-  const historyWorkflow = useIdeStore((s) => s.historyWorkflow);
-  const historyItemsByWorkflow = useIdeStore((s) => s.historyItemsByWorkflow);
-  const historyLoadingByWorkflow = useIdeStore((s) => s.historyLoadingByWorkflow);
   const workflowProgressByName = useIdeStore((s) => s.workflowProgressByName);
-  const setHistoryItems = useIdeStore((s) => s.setHistoryItems);
-  const setHistoryWorkflow = useIdeStore((s) => s.setHistoryWorkflow);
   const setWorkflowProgress = useIdeStore((s) => s.setWorkflowProgress);
-  const resetWorkflowProgress = useIdeStore((s) => s.resetWorkflowProgress);
-  const loadHistory = useIdeStore((s) => s.loadHistory);
-  const scriptBaseline = useIdeStore((s) => s.scriptBaseline);
-  const animationBaseline = useIdeStore((s) => s.animationBaseline);
   const captureScriptBaseline = useIdeStore((s) => s.captureScriptBaseline);
-  const captureAnimationBaseline = useIdeStore((s) => s.captureAnimationBaseline);
 
   const [activeTab, setActiveTab] = useState<PanelTab>('progress');
+  const [selectedWorkflow, setSelectedWorkflow] = useState<WorkflowName | null>(null);
   const [elapsedMs, setElapsedMs] = useState(0);
   const [statusPanelHeight, setStatusPanelHeight] = useState(368);
   const [isResizingStatusPanel, setIsResizingStatusPanel] = useState(false);
+  const [timelineItems, setTimelineItems] = useState<TaskEventRecord[]>([]);
+  const [branchArtifacts, setBranchArtifacts] = useState<ArtifactResponse[]>([]);
+  const [timelineLoading, setTimelineLoading] = useState(false);
+  const [artifactLoading, setArtifactLoading] = useState(false);
   const logsEndRef = useRef<HTMLDivElement>(null);
 
   const isGenerating = rewriteStatus === 'generating' || aiStatus === 'generating';
@@ -142,34 +145,12 @@ export const CodeEditor: React.FC = () => {
       ].filter(Boolean) as WorkflowName[]),
     [animationThreadId, scriptThreadId]
   );
-
-  const selectedWorkflow = historyWorkflow ?? availableWorkflows[0] ?? null;
-  const historyItems = selectedWorkflow ? historyItemsByWorkflow[selectedWorkflow] ?? [] : [];
-  const historyLoading = selectedWorkflow
-    ? historyLoadingByWorkflow[selectedWorkflow]
-    : false;
-  const currentCheckpointId =
-    selectedWorkflow === 'conversational_tone' ? scriptCheckpointId : animationCheckpointId;
   const selectedProgress = selectedWorkflow
     ? workflowProgressByName[selectedWorkflow]
     : null;
-
-  const hasScriptDraftChanges =
-    !!scriptBaseline &&
-    (scriptBaseline.sourceText !== sourceText || scriptBaseline.oralScript !== oralScript);
-  const hasAnimationDraftChanges = animationBaseline !== JSON.stringify(scenes);
-
-  const rollbackRiskMessage = useMemo(() => {
-    if (selectedWorkflow === 'conversational_tone' && hasScriptDraftChanges) {
-      return '你当前改过原文或口播稿，恢复后这些草稿可能与历史检查点不一致。';
-    }
-
-    if (selectedWorkflow === 'animation' && hasAnimationDraftChanges) {
-      return '你当前改过镜头脚本、代码或时间轴，恢复后这些本地修改可能被新的结果覆盖。';
-    }
-
-    return '从历史检查点恢复时，系统会继续向下执行后续节点，而不是只查看旧结果。';
-  }, [hasAnimationDraftChanges, hasScriptDraftChanges, selectedWorkflow]);
+  const activeTaskEvents = activeAnimationTaskId
+    ? taskEventsByTaskId[activeAnimationTaskId] ?? []
+    : [];
 
   useEffect(() => {
     if (!isResizingStatusPanel) return;
@@ -206,16 +187,52 @@ export const CodeEditor: React.FC = () => {
   }, [isGenerating, processStartTime]);
 
   useEffect(() => {
-    if (aiStatus === 'idle' && animationThreadId) {
-      void loadHistory('animation');
+    if (!currentSessionId) {
+      setTimelineItems([]);
+      return;
     }
-  }, [aiStatus, animationThreadId, loadHistory]);
+    let cancelled = false;
+    setTimelineLoading(true);
+    void getSessionTimeline(currentSessionId, currentBranchId, 80)
+      .then((response) => {
+        if (!cancelled) {
+          setTimelineItems(response.items ?? []);
+        }
+      })
+      .catch((error) => {
+        console.error('load timeline error:', error);
+      })
+      .finally(() => {
+        if (!cancelled) setTimelineLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [currentSessionId, currentBranchId, aiStatus]);
 
   useEffect(() => {
-    if (rewriteStatus === 'success' && scriptThreadId) {
-      void loadHistory('conversational_tone');
+    if (!currentBranchId) {
+      setBranchArtifacts([]);
+      return;
     }
-  }, [loadHistory, rewriteStatus, scriptThreadId]);
+    let cancelled = false;
+    setArtifactLoading(true);
+    void listBranchArtifacts(currentBranchId)
+      .then((response) => {
+        if (!cancelled) {
+          setBranchArtifacts(response.items ?? []);
+        }
+      })
+      .catch((error) => {
+        console.error('load branch artifacts error:', error);
+      })
+      .finally(() => {
+        if (!cancelled) setArtifactLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [currentBranchId, aiStatus]);
 
   useEffect(() => {
     logsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -223,71 +240,34 @@ export const CodeEditor: React.FC = () => {
 
   useEffect(() => {
     if (!selectedWorkflow && availableWorkflows.length > 0) {
-      setHistoryWorkflow(availableWorkflows[0]);
+      setSelectedWorkflow(availableWorkflows[0]);
     }
-  }, [availableWorkflows, selectedWorkflow, setHistoryWorkflow]);
+  }, [availableWorkflows, selectedWorkflow]);
 
-  const readSse = useCallback(
+  const readWorkflowSse = useCallback(
     async (response: Response, workflow: WorkflowName, onUpdate?: (payload: any) => void) => {
-      const reader = response.body?.getReader();
-      const decoder = new TextDecoder('utf-8');
-
-      if (!reader) {
-        throw new Error('无法初始化流式读取器');
-      }
-
-      let buffer = '';
-
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
-
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue;
-          const dataStr = line.replace('data: ', '').trim();
-          if (!dataStr) continue;
-
-          let payload;
-          try {
-            payload = JSON.parse(dataStr);
-          } catch (error) {
-            console.warn('解析 SSE 数据失败:', dataStr, error);
-            continue;
+      await readSse(response, (payload) => {
+        const data = payload as any;
+        if (data.thread_id) {
+          if (workflow === 'conversational_tone') {
+            setScriptThreadContext(data.thread_id, data.checkpoint_id ?? undefined);
+          } else {
+            setAnimationThreadContext(data.thread_id, data.checkpoint_id ?? undefined);
           }
-
-          if (payload.thread_id) {
-            if (workflow === 'conversational_tone') {
-              setScriptThreadContext(payload.thread_id, payload.checkpoint_id ?? undefined);
-            } else {
-              setAnimationThreadContext(payload.thread_id, payload.checkpoint_id ?? undefined);
-            }
-          }
-
-          if (payload.type === 'end' && payload.checkpoint_id) {
-            if (workflow === 'conversational_tone') {
-              setScriptThreadContext(payload.thread_id ?? scriptThreadId, payload.checkpoint_id);
-            } else {
-              setAnimationThreadContext(
-                payload.thread_id ?? animationThreadId,
-                payload.checkpoint_id
-              );
-            }
-          }
-
-          onUpdate?.(payload);
         }
-      }
+
+        if (data.type === 'end' && data.checkpoint_id) {
+          if (workflow === 'conversational_tone') {
+            setScriptThreadContext(data.thread_id ?? scriptThreadId, data.checkpoint_id);
+          } else {
+            setAnimationThreadContext(data.thread_id ?? animationThreadId, data.checkpoint_id);
+          }
+        }
+
+        onUpdate?.(data);
+      });
     },
-    [
-      animationThreadId,
-      scriptThreadId,
-      setAnimationThreadContext,
-      setScriptThreadContext,
-    ]
+    [animationThreadId, scriptThreadId, setAnimationThreadContext, setScriptThreadContext]
   );
 
   const markWorkflowNode = useCallback(
@@ -308,42 +288,6 @@ export const CodeEditor: React.FC = () => {
       });
     },
     [setWorkflowProgress, workflowProgressByName]
-  );
-
-  const applyAnimationUpdate = useCallback(
-    (updateData: any, logPrefix = '节点完成') => {
-      const nodeName = Object.keys(updateData)[0];
-      const nodeData = updateData[nodeName];
-      if (!nodeName || !nodeData) return;
-
-      addProcessLog(`${logPrefix}：${formatWorkflowAction('animation', nodeName)}`);
-      markWorkflowNode('animation', nodeName, 'success');
-
-      if (nodeName === 'director_node' && nodeData.director?.scenes) {
-        const parsedScenes = nodeData.director.scenes.map((scene: any) => ({
-          id: scene.scene_id,
-          durationInFrames: Math.ceil((scene.duration || 5) * 30),
-          componentType: scene.scene_id.replace(/\s+/g, ''),
-          script: scene.script,
-          visual_design: scene.visual_design,
-          marks: scene.animation_marks || {},
-          code:
-            '// Waiting for regenerated scene code.\n// Visual design:\n// ' +
-            scene.visual_design,
-        }));
-        setScenes(parsedScenes);
-        addProcessLog(`已生成 ${parsedScenes.length} 个镜头。`);
-      }
-
-      if (nodeName === 'coder_node' && nodeData.coder) {
-        const coders = Array.isArray(nodeData.coder) ? nodeData.coder : [nodeData.coder];
-        coders.forEach((coder: any) => {
-          updateSceneCode(coder.scene_id, coder.code);
-          addProcessLog(`代码已更新：${coder.scene_id}`);
-        });
-      }
-    },
-    [addProcessLog, markWorkflowNode, setScenes, updateSceneCode]
   );
 
   const handleChange = useCallback(
@@ -380,174 +324,6 @@ export const CodeEditor: React.FC = () => {
     });
   }, []);
 
-  const buildRestoreConfirmText = useCallback(
-    (workflow: WorkflowName, item: WorkflowHistoryItem) => {
-      const createdAt = item.created_at
-        ? new Date(item.created_at).toLocaleString('zh-CN', { hour12: false })
-        : '未知时间';
-      const actionLabel = formatWorkflowAction(
-        workflow,
-        (item.values?.last_action as string | undefined) ?? null
-      );
-      const nextNodes =
-        item.next_nodes.length > 0
-          ? item.next_nodes.map((node) => formatWorkflowAction(workflow, node)).join('、')
-          : '无';
-
-      const lines = [
-        `将恢复到 ${createdAt} 的检查点。`,
-        `影响范围：${getWorkflowLabel(workflow)}`,
-        `当时阶段：${actionLabel}`,
-        `恢复后会继续重新生成：${nextNodes}`,
-      ];
-
-      if (workflow === 'conversational_tone' && hasScriptDraftChanges) {
-        lines.push('警告：你当前修改过原文或口播稿，这些草稿可能被新的结果覆盖。');
-      }
-
-      if (workflow === 'animation' && hasAnimationDraftChanges) {
-        lines.push('警告：你当前修改过镜头脚本、代码或时间轴，这些本地修改可能被新的结果覆盖。');
-      }
-
-      lines.push('是否继续“恢复到此并重新生成”？');
-      return lines.join('\n');
-    },
-    [hasAnimationDraftChanges, hasScriptDraftChanges]
-  );
-
-  const forkFromCheckpoint = useCallback(
-    async (workflow: WorkflowName, item: WorkflowHistoryItem) => {
-      const threadId = workflow === 'conversational_tone' ? scriptThreadId : animationThreadId;
-      if (!threadId) return;
-
-      const confirmed = window.confirm(buildRestoreConfirmText(workflow, item));
-      if (!confirmed) return;
-
-      setProcessStartTime(Date.now());
-      setActiveTab('progress');
-      const workflowLabel = getWorkflowLabel(workflow);
-      setWorkflowProgress(workflow, {
-        status: 'running',
-        nodeKey: item.next_nodes[0] ?? null,
-        nodeLabel: `正在恢复${workflowLabel}`,
-        description: `系统会先回到这个检查点，再重新生成后续 ${item.next_nodes.length} 个节点。`,
-        lastError: null,
-      });
-
-      if (workflow === 'conversational_tone') {
-        setRewriteStatus('generating');
-        setAiStatus('idle');
-      } else {
-        setAiStatus('generating');
-        setRewriteStatus('idle');
-      }
-
-      addProcessLog(`开始从历史检查点恢复：${item.checkpoint_id.slice(0, 12)}`);
-
-      try {
-        const response = await fetch(`/api/workflows/${workflow}/fork_sse`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            thread_id: threadId,
-            checkpoint_id: item.checkpoint_id,
-            values: null,
-            as_node: null,
-          }),
-        });
-
-        if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}`);
-        }
-
-        await readSse(response, workflow, (payload) => {
-          if (payload.type === 'error') {
-            throw new Error(payload.message || '恢复并重新生成失败');
-          }
-
-          if (payload.type === 'setup') {
-            setWorkflowProgress(workflow, {
-              status: 'running',
-              nodeLabel: `正在恢复${getWorkflowLabel(workflow)}`,
-              description: '已连接到恢复任务，系统正在准备重新生成。',
-              lastError: null,
-            });
-            return;
-          }
-
-          if (payload.type === 'updates' && payload.data) {
-            let updateData = payload.data;
-            if (updateData.type === 'updates' && updateData.data) {
-              updateData = updateData.data;
-            }
-
-            if (workflow === 'conversational_tone') {
-              const nodeName = Object.keys(updateData)[0];
-              const nodeData = updateData[nodeName];
-              if (!nodeName || !nodeData) return;
-
-              addProcessLog(`恢复后完成阶段：${formatWorkflowAction(workflow, nodeName)}`);
-              markWorkflowNode(workflow, nodeName, 'success');
-
-              if (nodeData.current_script) {
-                setOralScript(nodeData.current_script);
-              }
-            } else {
-              applyAnimationUpdate(updateData, '恢复后完成阶段');
-            }
-          }
-        });
-
-        addProcessLog('已恢复到指定检查点，并完成后续重新生成。');
-        setWorkflowProgress(workflow, {
-          status: 'success',
-          description: '恢复成功，当前结果已经刷新为新的执行结果。',
-          lastError: null,
-        });
-        if (workflow === 'conversational_tone') {
-          setRewriteStatus('success');
-          captureScriptBaseline();
-        } else {
-          setAiStatus('idle');
-          captureAnimationBaseline();
-        }
-        await loadHistory(workflow);
-      } catch (error) {
-        const message = (error as Error).message;
-        addProcessLog(`恢复失败：${message}`);
-        setWorkflowProgress(workflow, {
-          status: 'error',
-          description: '恢复任务中断，请先刷新检查点或重试当前步骤。',
-          lastError: message,
-        });
-        if (workflow === 'conversational_tone') {
-          setRewriteStatus('error');
-        } else {
-          setAiStatus('error');
-        }
-      } finally {
-        setProcessStartTime(null);
-      }
-    },
-    [
-      animationThreadId,
-      applyAnimationUpdate,
-      buildRestoreConfirmText,
-      captureAnimationBaseline,
-      captureScriptBaseline,
-      loadHistory,
-      markWorkflowNode,
-      readSse,
-      scriptThreadId,
-      setAiStatus,
-      setOralScript,
-      setProcessStartTime,
-      setRewriteStatus,
-      setWorkflowProgress,
-      addProcessLog,
-    ]
-  );
-
   const retryRewrite = useCallback(async () => {
     setRewriteStatus('generating');
     setAiStatus('idle');
@@ -563,17 +339,12 @@ export const CodeEditor: React.FC = () => {
     addProcessLog('开始重试口播稿生成。');
 
     try {
-      const response = await fetch('/api/generate_script_sse', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ source_text: sourceText, thread_id: scriptThreadId }),
+      const response = await openGenerateScriptSse({
+        source_text: sourceText,
+        thread_id: scriptThreadId,
       });
 
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      await readSse(response, 'conversational_tone', (payload) => {
+      await readWorkflowSse(response, 'conversational_tone', (payload) => {
         if (payload.type === 'error') {
           throw new Error(payload.message || '口播稿重试失败');
         }
@@ -630,7 +401,7 @@ export const CodeEditor: React.FC = () => {
     addProcessLog,
     captureScriptBaseline,
     markWorkflowNode,
-    readSse,
+    readWorkflowSse,
     scriptThreadId,
     setAiStatus,
     setOralScript,
@@ -641,6 +412,7 @@ export const CodeEditor: React.FC = () => {
   ]);
 
   const retryVideo = useCallback(async () => {
+    if (!activeAnimationTaskId) return;
     setAiStatus('generating');
     setRewriteStatus('idle');
     setActiveTab('progress');
@@ -655,47 +427,12 @@ export const CodeEditor: React.FC = () => {
     addProcessLog('开始重试分镜与代码生成。');
 
     try {
-      const response = await fetch('/api/generate_animation_sse', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ source_text: oralScript, thread_id: animationThreadId }),
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      await readSse(response, 'animation', (payload) => {
-        if (payload.type === 'error') {
-          throw new Error(payload.message || '分镜重试失败');
-        }
-
-        if (payload.type === 'setup') {
-          setWorkflowProgress('animation', {
-            status: 'running',
-            nodeLabel: '正在重试分镜生成',
-            description: '已连接到分镜重试任务。',
-          });
-          return;
-        }
-
-        if (payload.type === 'updates' && payload.data) {
-          let updateData = payload.data;
-          if (updateData.type === 'updates' && updateData.data) {
-            updateData = updateData.data;
-          }
-
-          applyAnimationUpdate(updateData);
-        }
-      });
-
-      addProcessLog('分镜与代码重试完成。');
+      await retryTask(activeAnimationTaskId);
+      addProcessLog(`已请求重试任务：${activeAnimationTaskId}`);
       setWorkflowProgress('animation', {
-        status: 'success',
-        description: '分镜与代码已重新生成完成。',
+        status: 'running',
+        description: '已请求后端重试当前视频任务。',
       });
-      setAiStatus('idle');
-      captureAnimationBaseline();
     } catch (error) {
       const message = (error as Error).message;
       addProcessLog(`分镜与代码重试失败：${message}`);
@@ -710,16 +447,22 @@ export const CodeEditor: React.FC = () => {
     }
   }, [
     addProcessLog,
-    animationThreadId,
-    applyAnimationUpdate,
-    captureAnimationBaseline,
-    oralScript,
-    readSse,
+    activeAnimationTaskId,
     setAiStatus,
     setProcessStartTime,
     setRewriteStatus,
     setWorkflowProgress,
   ]);
+
+  const cancelVideoTask = useCallback(async () => {
+    if (!activeAnimationTaskId || !isGenerating) return;
+    try {
+      await cancelTask(activeAnimationTaskId);
+      addProcessLog(`已请求取消任务：${activeAnimationTaskId}`);
+    } catch (error) {
+      addProcessLog(`取消任务失败：${(error as Error).message}`);
+    }
+  }, [activeAnimationTaskId, addProcessLog, isGenerating]);
 
   const retryHandler = useMemo(() => {
     if (lastErrorType === 'rewrite') return retryRewrite;
@@ -752,23 +495,66 @@ export const CodeEditor: React.FC = () => {
             </div>
           </div>
         ) : (
-          <Editor
-            height="100%"
-            defaultLanguage="typescript"
-            theme="vs-dark"
-            value={activeScene.code}
-            onChange={handleChange}
-            onMount={handleEditorMount}
-            options={{
-              minimap: { enabled: false },
-              fontSize: 13,
-              fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
-              wordWrap: 'on',
-              padding: { top: 16 },
-              smoothScrolling: true,
-              scrollBeyondLastLine: false,
-            }}
-          />
+          <div className="flex h-full flex-col">
+            <div className="grid grid-cols-2 gap-2 border-b border-gray-800 bg-[#111113] px-3 py-2 text-[11px] text-gray-400">
+              <div className="rounded border border-gray-800 bg-[#0d0d11] px-3 py-2">
+                <div>Scene Artifact</div>
+                <div className="mt-1 font-mono text-gray-200">
+                  {activeScene.sceneArtifactId || '待生成'}
+                </div>
+              </div>
+              <div className="rounded border border-gray-800 bg-[#0d0d11] px-3 py-2">
+                <div>版本 / 状态</div>
+                <div className="mt-1 font-mono text-gray-200">
+                  v{activeScene.version || 1} · {activeScene.status || 'draft'}
+                </div>
+              </div>
+              <div className="rounded border border-gray-800 bg-[#0d0d11] px-3 py-2">
+                <div>脚本长度</div>
+                <div className="mt-1 font-mono text-gray-200">
+                  {activeScene.script.replace(/\s/g, '').length} 字
+                </div>
+              </div>
+              <div className="rounded border border-gray-800 bg-[#0d0d11] px-3 py-2">
+                <div>校验状态</div>
+                <div
+                  className={`mt-1 font-mono ${
+                    activeScene.validationReport &&
+                    (activeScene.validationReport.passed === false ||
+                      Number(activeScene.validationReport.error_count ?? 0) > 0)
+                      ? 'text-red-300'
+                      : 'text-emerald-300'
+                  }`}
+                >
+                  {activeScene.validationReport &&
+                  (activeScene.validationReport.passed === false ||
+                    Number(activeScene.validationReport.error_count ?? 0) > 0)
+                    ? `失败 ${String(activeScene.validationReport.error_count ?? 1)} 项`
+                    : '通过 / 待校验'}
+                </div>
+              </div>
+            </div>
+
+            <div className="min-h-0 flex-1">
+              <Editor
+                height="100%"
+                defaultLanguage="typescript"
+                theme="vs-dark"
+                value={activeScene.code}
+                onChange={handleChange}
+                onMount={handleEditorMount}
+                options={{
+                  minimap: { enabled: false },
+                  fontSize: 13,
+                  fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
+                  wordWrap: 'on',
+                  padding: { top: 16 },
+                  smoothScrolling: true,
+                  scrollBeyondLastLine: false,
+                }}
+              />
+            </div>
+          </div>
         )}
       </div>
 
@@ -797,10 +583,6 @@ export const CodeEditor: React.FC = () => {
             <button
               onClick={() => {
                 clearProcessLogs();
-                availableWorkflows.forEach((workflow) => {
-                  setHistoryItems(workflow, []);
-                  resetWorkflowProgress(workflow);
-                });
               }}
               className="min-h-10 rounded border border-gray-700 px-3 py-2 text-[11px] text-gray-400 transition-colors hover:text-white"
             >
@@ -808,25 +590,36 @@ export const CodeEditor: React.FC = () => {
             </button>
             <button
               onClick={() => {
-                availableWorkflows.forEach((workflow) => {
-                  void loadHistory(workflow);
-                });
+                if (currentSessionId) {
+                  void getSessionTimeline(currentSessionId, currentBranchId, 80).then((response) =>
+                    setTimelineItems(response.items ?? [])
+                  );
+                }
+                if (currentBranchId) {
+                  void listBranchArtifacts(currentBranchId).then((response) =>
+                    setBranchArtifacts(response.items ?? [])
+                  );
+                }
               }}
               disabled={
-                availableWorkflows.length === 0 ||
-                availableWorkflows.some((workflow) => historyLoadingByWorkflow[workflow])
+                (!currentSessionId && !currentBranchId) || timelineLoading || artifactLoading
               }
               className="flex min-h-10 items-center gap-1 rounded border border-violet-500/30 px-3 py-2 text-[11px] text-violet-300 transition-colors hover:bg-violet-500/10 disabled:opacity-50"
             >
               <RefreshCw
-                className={`h-3 w-3 ${
-                  availableWorkflows.some((workflow) => historyLoadingByWorkflow[workflow])
-                    ? 'animate-spin'
-                    : ''
-                }`}
+                className={`h-3 w-3 ${timelineLoading || artifactLoading ? 'animate-spin' : ''}`}
               />
-              刷新检查点
+              刷新数据
             </button>
+            {activeAnimationTaskId && isGenerating && (
+              <button
+                onClick={() => void cancelVideoTask()}
+                className="flex min-h-10 items-center gap-1 rounded border border-red-500/30 px-3 py-2 text-[11px] text-red-300 transition-colors hover:bg-red-500/10"
+              >
+                <AlertTriangle className="h-3 w-3" />
+                取消任务
+              </button>
+            )}
           </div>
         </div>
 
@@ -861,7 +654,7 @@ export const CodeEditor: React.FC = () => {
                   {availableWorkflows.map((workflow) => (
                     <button
                       key={workflow}
-                      onClick={() => setHistoryWorkflow(workflow)}
+                      onClick={() => setSelectedWorkflow(workflow)}
                       className={`rounded border px-3 py-2 text-[11px] transition-colors ${
                         selectedWorkflow === workflow
                           ? 'border-blue-500/40 bg-blue-500/10 text-blue-300'
@@ -929,6 +722,19 @@ export const CodeEditor: React.FC = () => {
                   </div>
                 </div>
 
+                {(currentSessionId || currentBranchId || activeAnimationTaskId) && (
+                  <div className="mt-4 grid gap-2 text-[11px] text-gray-500">
+                    {currentSessionId && <div>Session：{currentSessionId}</div>}
+                    {currentBranchId && <div>Branch：{currentBranchId}</div>}
+                    {activeAnimationTaskId && (
+                      <div>
+                        Task：{activeAnimationTaskId}
+                        {activeAnimationTaskStatus ? ` · ${activeAnimationTaskStatus}` : ''}
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 {selectedProgress.lastError && (
                   <div className="mt-4 rounded border border-red-500/20 bg-red-500/10 px-3 py-2 text-[12px] text-red-200">
                     {selectedProgress.lastError}
@@ -941,7 +747,7 @@ export const CodeEditor: React.FC = () => {
                 <div className="mt-3 space-y-2 text-[12px] leading-relaxed text-gray-400">
                   <p>脚本流程会先改写口播稿，再评估质量；达到标准后才会停止。</p>
                   <p>分镜流程会先拆分镜头，再补视觉方案，最后生成镜头代码。</p>
-                  <p>从历史检查点恢复时，系统会继续向下执行，而不是只打开旧结果。</p>
+                  <p>当前前端已按 task、timeline 和 artifact 组织执行信息，不再提供历史回滚入口。</p>
                 </div>
               </div>
             </div>
@@ -949,107 +755,98 @@ export const CodeEditor: React.FC = () => {
 
           {activeTab === 'history' && (
             <div className="space-y-3">
-              {availableWorkflows.length > 1 && (
-                <div className="flex gap-2">
-                  {availableWorkflows.map((workflow) => (
-                    <button
-                      key={workflow}
-                      onClick={() => setHistoryWorkflow(workflow)}
-                      className={`rounded border px-3 py-2 text-[11px] transition-colors ${
-                        selectedWorkflow === workflow
-                          ? 'border-violet-500/40 bg-violet-500/10 text-violet-300'
-                          : 'border-gray-800 text-gray-500 hover:text-gray-300'
-                      }`}
+              <div className="rounded-lg border border-blue-500/20 bg-blue-500/10 px-3 py-3 text-[12px] leading-relaxed text-blue-100">
+                <p className="font-medium">业务历史</p>
+                <p className="mt-1 text-blue-200/90">
+                  这里展示当前 session timeline 和 branch artifact 历史，作为现有后端能力下的主视图。
+                </p>
+              </div>
+
+              <div className="rounded-lg border border-gray-800 bg-[#121216] p-3">
+                <div className="mb-3 flex items-center justify-between gap-3">
+                  <p className="text-[11px] uppercase tracking-[0.24em] text-gray-500">Timeline</p>
+                  <span className="text-[11px] text-gray-500">
+                    {timelineLoading ? '加载中…' : `${timelineItems.length} 条事件`}
+                  </span>
+                </div>
+                <div className="space-y-2">
+                  {!currentSessionId && (
+                    <div className="rounded border border-dashed border-gray-800 px-3 py-4 text-[12px] text-gray-500">
+                      还没有 session，上方生成视频后这里会出现任务时间线。
+                    </div>
+                  )}
+                  {currentSessionId && timelineItems.length === 0 && !timelineLoading && (
+                    <div className="rounded border border-dashed border-gray-800 px-3 py-4 text-[12px] text-gray-500">
+                      当前 session 暂无时间线事件。
+                    </div>
+                  )}
+                  {timelineItems.slice(0, 12).map((item) => (
+                    <div
+                      key={item.id}
+                      className="rounded border border-gray-800 bg-[#0d0d11] px-3 py-2 text-[12px]"
                     >
-                      {getWorkflowLabel(workflow)}
-                    </button>
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-gray-200">{item.event_type}</span>
+                        <span className="text-[11px] text-gray-500">
+                          {new Date(item.created_at).toLocaleString('zh-CN', {
+                            hour12: false,
+                          })}
+                        </span>
+                      </div>
+                      <div className="mt-1 text-[11px] text-gray-500">
+                        {item.node_key ? `节点 ${item.node_key}` : `Task ${item.task_id}`}
+                      </div>
+                    </div>
                   ))}
                 </div>
-              )}
+              </div>
 
-              {selectedWorkflow && (
-                <div className="rounded-lg border border-orange-500/20 bg-orange-500/10 px-3 py-3 text-[12px] leading-relaxed text-orange-100">
-                  <div className="flex items-start gap-2">
-                    <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-                    <div>
-                      <p className="font-medium">恢复说明</p>
-                      <p className="mt-1 text-orange-200/90">{rollbackRiskMessage}</p>
+              <div className="rounded-lg border border-gray-800 bg-[#121216] p-3">
+                <div className="mb-3 flex items-center justify-between gap-3">
+                  <p className="text-[11px] uppercase tracking-[0.24em] text-gray-500">Artifacts</p>
+                  <span className="text-[11px] text-gray-500">
+                    {artifactLoading ? '加载中…' : `${branchArtifacts.length} 个产物`}
+                  </span>
+                </div>
+                <div className="space-y-2">
+                  {!currentBranchId && (
+                    <div className="rounded border border-dashed border-gray-800 px-3 py-4 text-[12px] text-gray-500">
+                      当前还没有 branch，上方生成视频后这里会出现当前版本产物。
                     </div>
-                  </div>
-                </div>
-              )}
-
-              {!selectedWorkflow && (
-                <div className="rounded border border-dashed border-gray-800 px-3 py-4 text-[12px] text-gray-500">
-                  还没有可查看的检查点。先完成一次生成，这里才会出现可恢复的历史阶段。
-                </div>
-              )}
-
-              {selectedWorkflow && historyItems.length === 0 && !historyLoading && (
-                <div className="rounded border border-dashed border-gray-800 px-3 py-4 text-[12px] text-gray-500">
-                  当前流程还没有形成可恢复的阶段结果。至少完成 1 个节点后，才能从检查点重新开始。
-                </div>
-              )}
-
-              {historyItems.map((item) => {
-                const actionLabel = formatWorkflowAction(
-                  selectedWorkflow as WorkflowName,
-                  (item.values?.last_action as string | undefined) ?? null
-                );
-                const createdAt = item.created_at
-                  ? new Date(item.created_at).toLocaleString('zh-CN', { hour12: false })
-                  : '未知时间';
-                const nextNodes =
-                  item.next_nodes.length > 0
-                    ? item.next_nodes
-                        .map((node) => formatWorkflowAction(selectedWorkflow as WorkflowName, node))
-                        .join('、')
-                    : '无';
-
-                return (
-                  <div
-                    key={item.checkpoint_id}
-                    className="rounded-lg border border-violet-500/20 bg-violet-500/5 p-3"
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0 flex-1">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="text-[11px] text-gray-500">{createdAt}</span>
-                          <span className="rounded bg-violet-500/10 px-2 py-0.5 text-[11px] text-violet-300">
-                            {actionLabel}
-                          </span>
-                          {item.checkpoint_id === currentCheckpointId && (
-                            <span className="rounded bg-emerald-500/10 px-2 py-0.5 text-[10px] text-emerald-300">
-                              当前结果
-                            </span>
-                          )}
-                        </div>
-                        <p className="mt-2 text-[12px] leading-relaxed text-gray-400">
-                          从这里恢复后，系统会继续重新生成后续节点，而不是只打开旧版本。
-                        </p>
-                        <div className="mt-2 grid gap-2 text-[11px] text-gray-500">
-                          <div>后续会重新生成：{nextNodes}</div>
-                          <div>检查点编号：{item.checkpoint_id.slice(0, 12)}...</div>
-                        </div>
+                  )}
+                  {currentBranchId && branchArtifacts.length === 0 && !artifactLoading && (
+                    <div className="rounded border border-dashed border-gray-800 px-3 py-4 text-[12px] text-gray-500">
+                      当前 branch 暂无 artifact。
+                    </div>
+                  )}
+                  {branchArtifacts.slice(0, 10).map((artifact) => (
+                    <div
+                      key={artifact.artifact_id}
+                      className="rounded border border-gray-800 bg-[#0d0d11] px-3 py-2 text-[12px]"
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-gray-200">{artifact.artifact_type}</span>
+                        <span className="rounded bg-gray-800 px-2 py-0.5 text-[10px] text-gray-400">
+                          v{artifact.version}
+                        </span>
                       </div>
-                      <button
-                        onClick={() => forkFromCheckpoint(selectedWorkflow as WorkflowName, item)}
-                        disabled={!selectedWorkflow || isGenerating}
-                        className="flex min-h-11 shrink-0 items-center gap-1 rounded border border-orange-500/30 px-3 py-2 text-[11px] text-orange-300 transition-all hover:border-orange-400 hover:bg-orange-500/10 disabled:opacity-50"
-                        title="恢复到这个历史阶段，并重新生成后续内容"
-                      >
-                        <RotateCcw className="h-3.5 w-3.5" />
-                        从此处重新生成
-                      </button>
+                      <div className="mt-1 text-[11px] text-gray-500">
+                        {artifact.summary || artifact.artifact_id}
+                      </div>
                     </div>
-                  </div>
-                );
-              })}
+                  ))}
+                </div>
+              </div>
             </div>
           )}
 
           {activeTab === 'logs' && (
             <div className="space-y-2">
+              {activeTaskEvents.length > 0 && (
+                <div className="rounded border border-blue-500/20 bg-blue-500/10 px-3 py-2 text-[12px] text-blue-100">
+                  当前视频任务已收到 {activeTaskEvents.length} 条标准事件，日志面板下方仍保留聚合后的过程日志。
+                </div>
+              )}
               {processLogs.length === 0 ? (
                 <div className="rounded border border-dashed border-gray-800 px-3 py-4 text-[12px] text-gray-500">
                   当前还没有执行日志。开始生成、恢复或重试后，这里会展示详细过程。

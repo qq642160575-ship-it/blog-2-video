@@ -11,6 +11,13 @@ export const Timeline: React.FC = () => {
   const updateSceneMark = useIdeStore((s) => s.updateSceneMark);
   const oralScript = useIdeStore((s) => s.oralScript);
   const [isOpen, setIsOpen] = useState(true);
+  const readyCount = scenes.filter((scene) => scene.status === 'ready').length;
+  const failedCount = scenes.filter(
+    (scene) =>
+      scene.status === 'failed' ||
+      scene.validationReport?.passed === false ||
+      Number(scene.validationReport?.error_count ?? 0) > 0
+  ).length;
 
   const handleSelect = useCallback((id: string) => setActiveScene(id), [setActiveScene]);
   const handleDurationChange = useCallback(
@@ -37,7 +44,13 @@ export const Timeline: React.FC = () => {
           <span className="flex h-5 w-5 items-center justify-center rounded-full bg-emerald-500/10 text-[10px] font-bold text-emerald-400">
             3
           </span>
-          <h3 className="text-xs font-bold tracking-wide text-gray-300">Timeline 分镜</h3>
+          <h3 className="text-xs font-bold tracking-wide text-gray-300">Scene Artifacts</h3>
+          {scenes.length > 0 && (
+            <span className="rounded bg-gray-900 px-2 py-1 text-[10px] font-mono text-gray-500">
+              {readyCount}/{scenes.length} ready
+              {failedCount > 0 ? ` · ${failedCount} failed` : ''}
+            </span>
+          )}
         </div>
         {isOpen ? (
           <ChevronUp className="h-4 w-4 text-gray-500" />

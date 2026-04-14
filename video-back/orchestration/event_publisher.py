@@ -39,8 +39,9 @@ class TaskEventPublisher(Protocol):
 
 
 class InMemoryEventPublisher:
-    def __init__(self) -> None:
+    def __init__(self, event_repo: Any | None = None) -> None:
         self.events: list[TaskEvent] = []
+        self._event_repo = event_repo
 
     async def publish(
         self,
@@ -67,6 +68,8 @@ class InMemoryEventPublisher:
             payload=payload or {},
         )
         self.events.append(event)
+        if self._event_repo is not None:
+            await self._event_repo.append(event)
         return event
 
     def list_by_task(self, task_id: str) -> list[TaskEvent]:

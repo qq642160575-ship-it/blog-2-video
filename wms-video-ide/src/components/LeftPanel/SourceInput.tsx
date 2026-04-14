@@ -7,8 +7,17 @@ import {
   Sparkles,
   Video,
 } from 'lucide-react';
+import { openGenerateScriptSse } from '../../api/compat';
+import { getSceneArtifact, listBranchArtifacts } from '../../api/artifacts';
+import { createSession, createSessionTask } from '../../api/sessions';
+import { toLogEntry, toProgressPatch } from '../../adapters/eventAdapter';
+import { getCoderUpdates, toScenesFromDirectorNode } from '../../adapters/sceneAdapter';
+import { useTaskSse } from '../../hooks/useTaskSse';
 import { useIdeStore } from '../../store/useIdeStore';
+import { readSse } from '../../utils/sse';
 import { getNodePresentation } from '../../utils/workflowUi';
+import type { TaskEventRecord } from '../../types/event';
+import type { CompatSsePayload } from '../../adapters/workflowCompatAdapter';
 import type { WorkflowName } from '../../types/workflow';
 
 type ServerProgress = {
@@ -25,17 +34,8 @@ type ServerProgress = {
   detail?: Record<string, unknown>;
 };
 
-type SsePayload = {
-  type: string;
-  message?: string;
-  data?: Record<string, any>;
-  thread_id?: string;
-  checkpoint_id?: string | null;
-  workflow?: WorkflowName;
-  progress?: ServerProgress;
-};
-
 export const SourceInput: React.FC = () => {
+  const streamTaskEvents = useTaskSse();
   const sourceText = useIdeStore((s) => s.sourceText);
   const setSourceText = useIdeStore((s) => s.setSourceText);
   const oralScript = useIdeStore((s) => s.oralScript);
@@ -47,10 +47,14 @@ export const SourceInput: React.FC = () => {
   const clearProcessLogs = useIdeStore((s) => s.clearProcessLogs);
   const addProcessLog = useIdeStore((s) => s.addProcessLog);
   const setProcessStartTime = useIdeStore((s) => s.setProcessStartTime);
+  const setCurrentSessionContext = useIdeStore((s) => s.setCurrentSessionContext);
+  const setActiveAnimationTask = useIdeStore((s) => s.setActiveAnimationTask);
+  const setActiveAnimationTaskStatus = useIdeStore((s) => s.setActiveAnimationTaskStatus);
+  const appendTaskEvent = useIdeStore((s) => s.appendTaskEvent);
   const setScenes = useIdeStore((s) => s.setScenes);
+  const patchScene = useIdeStore((s) => s.patchScene);
   const updateSceneCode = useIdeStore((s) => s.updateSceneCode);
   const scriptThreadId = useIdeStore((s) => s.scriptThreadId);
-  const animationThreadId = useIdeStore((s) => s.animationThreadId);
   const setScriptThreadContext = useIdeStore((s) => s.setScriptThreadContext);
   const setAnimationThreadContext = useIdeStore((s) => s.setAnimationThreadContext);
   const setWorkflowProgress = useIdeStore((s) => s.setWorkflowProgress);
@@ -67,41 +71,6 @@ export const SourceInput: React.FC = () => {
   const oralSummary = oralScript.trim()
     ? `${oralScript.trim().replace(/\s+/g, '').length} 字`
     : '未生成';
-
-  const readSse = async (
-    response: Response,
-    onPayload: (payload: SsePayload) => void
-  ) => {
-    const reader = response.body?.getReader();
-    const decoder = new TextDecoder('utf-8');
-
-    if (!reader) {
-      throw new Error('无法初始化流式读取器');
-    }
-
-    let buffer = '';
-
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop() || '';
-
-      for (const line of lines) {
-        if (!line.startsWith('data: ')) continue;
-        const dataStr = line.replace('data: ', '').trim();
-        if (!dataStr) continue;
-
-        try {
-          onPayload(JSON.parse(dataStr));
-        } catch (error) {
-          console.warn('解析 SSE 数据失败:', dataStr, error);
-        }
-      }
-    }
-  };
 
   const applyServerProgress = (workflow: WorkflowName, progress?: ServerProgress) => {
     if (!progress) return;
@@ -123,6 +92,169 @@ export const SourceInput: React.FC = () => {
     });
   };
 
+  const applyAnimationTaskEvent = (event: TaskEventRecord) => {
+    console.log('[SSE EVENT]', event.event_type, event.node_key, event.payload);
+    appendTaskEvent(event);
+    if (event.event_type.startsWith('task.')) {
+      const nextStatus = event.event_type.replace('task.', '');
+      if (
+        nextStatus === 'queued' ||
+        nextStatus === 'running' ||
+        nextStatus === 'succeeded' ||
+        nextStatus === 'failed' ||
+        nextStatus === 'cancelled' ||
+        nextStatus === 'retrying'
+      ) {
+        setActiveAnimationTaskStatus(nextStatus);
+      }
+    }
+
+    const progressPatch = toProgressPatch(event, 'animation');
+    if (progressPatch) {
+      setWorkflowProgress(progressPatch.workflow, progressPatch.patch);
+    }
+
+    const logEntry = toLogEntry(event);
+    if (logEntry) {
+      addProcessLog(logEntry.content, logEntry.details);
+    }
+
+    // 新增：处理 artifact.published 事件
+    if (event.event_type === 'artifact.published') {
+      const payload = event.payload as any;
+      const artifactType = payload.artifact_type;
+      const summary = payload.summary || '';
+
+      addProcessLog(`产物已发布：${summary}`);
+
+      // 存储 artifact 信息到 store
+      if (payload.artifact_id) {
+        useIdeStore.getState().setArtifact(artifactType, {
+          artifact_id: payload.artifact_id,
+          artifact_type: artifactType,
+          summary: summary,
+          ...payload,
+        } as any);
+      }
+
+      // 增强逻辑：如果产物自带数据（例如新版后端推送的分镜列表），直接更新 scenes
+      if (artifactType === 'storyboard' && payload.data?.scenes) {
+        const currentScenes = useIdeStore.getState().scenes;
+        if (currentScenes.length === 0) {
+          const parsedScenes = toScenesFromDirectorNode(payload.data.scenes);
+          setScenes(parsedScenes);
+          addProcessLog(`已基于发布产物加载 ${parsedScenes.length} 个分镜。`);
+        }
+      }
+    }
+
+    // 新增：处理 scene.layout_generated 事件
+    if (event.event_type === 'scene.layout_generated') {
+      const payload = event.payload as any;
+      const sceneId = payload.scene_id;
+      const layoutSpec = payload.layout_spec;
+
+      if (sceneId && layoutSpec) {
+        patchScene(sceneId, { layout_spec: layoutSpec });
+        addProcessLog(`场景布局已同步：${sceneId}`);
+      }
+    }
+
+    // 新增：处理 scene.code_generated 事件
+    if (event.event_type === 'scene.code_generated') {
+      const payload = event.payload as any;
+      const sceneId = payload.scene_id;
+      const code = payload.code;
+
+      if (sceneId && code) {
+        updateSceneCode(sceneId, code);
+        useIdeStore.getState().setSceneCode(sceneId, code);
+        addProcessLog(`场景代码已生成：${sceneId}`);
+      }
+    }
+
+    if (event.event_type === 'workflow.node_completed') {
+      const nodeData = event.payload.data as Record<string, any> | undefined;
+      if (!nodeData) return;
+
+      // 增强分镜解析：支持 nodeData.director.scenes 或直接 nodeData.scenes
+      const scenesData = nodeData.director?.scenes || nodeData.scenes;
+
+      if (event.node_key === 'director_node' && Array.isArray(scenesData)) {
+        const parsedScenes = toScenesFromDirectorNode(scenesData);
+        if (parsedScenes.length > 0) {
+          setScenes(parsedScenes);
+          addProcessLog(`已生成 ${parsedScenes.length} 个分镜。`);
+          return;
+        } else {
+          console.warn('[SSE] Director node completed but 0 scenes parsed', nodeData);
+        }
+      }
+
+      if (event.node_key === 'coder_node' && nodeData.coder) {
+        getCoderUpdates(nodeData.coder).forEach((coder) => {
+          if (!coder.scene_id) return;
+          updateSceneCode(coder.scene_id, coder.code || '');
+          addProcessLog(`代码已返回：${coder.scene_id}`);
+        });
+      }
+    }
+
+    if (event.event_type === 'validation.failed') {
+      setWorkflowProgress('animation', {
+        status: 'error',
+        description: '存在校验失败的镜头，请检查日志和分镜状态。',
+        lastError: '存在校验失败的镜头',
+      });
+      const failedScenes = event.payload.failed_scenes as string[] | undefined;
+      failedScenes?.forEach((sceneId) => {
+        patchScene(sceneId, {
+          status: 'failed',
+          validationReport: {
+            passed: false,
+            failedScenes,
+            ...(event.payload as Record<string, unknown>),
+          },
+        });
+      });
+    }
+
+    if (event.event_type === 'task.completed') {
+      const sceneArtifactIds = event.payload.scene_artifact_ids as string[] | undefined;
+      if (sceneArtifactIds?.length) {
+        void Promise.all(sceneArtifactIds.map((sceneArtifactId) => getSceneArtifact(sceneArtifactId)))
+          .then((sceneArtifacts) => {
+            sceneArtifacts.forEach((sceneArtifact) => {
+              patchScene(sceneArtifact.scene_id, {
+                sceneArtifactId: sceneArtifact.scene_artifact_id,
+                artifactId: sceneArtifact.artifact_id,
+                version: sceneArtifact.version,
+                status: sceneArtifact.status,
+                validationReport: sceneArtifact.validation_report,
+                previewImageUrl: sceneArtifact.preview_image_url,
+                script: sceneArtifact.script_text || undefined,
+                code: sceneArtifact.code_text || undefined,
+                visual_design: sceneArtifact.scene_type
+                  ? `${sceneArtifact.scene_type} · ${sceneArtifact.status}`
+                  : undefined,
+              });
+            });
+          })
+          .catch((error) => {
+            addProcessLog(`加载 scene artifact 失败：${(error as Error).message}`);
+          });
+      }
+      setAiStatus('idle');
+      captureAnimationBaseline();
+      setProcessStartTime(null);
+    }
+
+    if (event.event_type === 'task.failed' || event.event_type === 'task.cancelled') {
+      setAiStatus('error');
+      setProcessStartTime(null);
+    }
+  };
+
   const handleRewrite = async () => {
     setRewriteStatus('generating');
     setAiStatus('idle');
@@ -139,33 +271,29 @@ export const SourceInput: React.FC = () => {
     addProcessLog('开始生成口播稿。');
 
     try {
-      const response = await fetch('/api/generate_script_sse', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          source_text: sourceText,
-          thread_id: scriptThreadId,
-        }),
+      const response = await openGenerateScriptSse({
+        source_text: sourceText,
+        thread_id: scriptThreadId,
       });
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
       await readSse(response, (payload) => {
-        if (payload.thread_id) {
-          setScriptThreadContext(payload.thread_id, payload.checkpoint_id ?? undefined);
+        const compatPayload = payload as CompatSsePayload;
+        const workflowPayload = compatPayload as CompatSsePayload & { progress?: ServerProgress };
+        if (compatPayload.thread_id) {
+          setScriptThreadContext(
+            compatPayload.thread_id,
+            compatPayload.checkpoint_id ?? undefined
+          );
         }
 
-        if (payload.progress) {
-          applyServerProgress('conversational_tone', payload.progress);
+        if (workflowPayload.progress) {
+          applyServerProgress('conversational_tone', workflowPayload.progress);
         }
 
-        if (payload.type === 'progress') {
+        if (compatPayload.type === 'progress') {
           return;
         }
 
-        if (payload.type === 'setup') {
+        if (compatPayload.type === 'setup') {
           setWorkflowProgress('conversational_tone', {
             status: 'running',
             nodeLabel: '正在生成口播脚本',
@@ -176,9 +304,12 @@ export const SourceInput: React.FC = () => {
           return;
         }
 
-        if (payload.type === 'end') {
-          if (payload.checkpoint_id) {
-            setScriptThreadContext(payload.thread_id ?? scriptThreadId, payload.checkpoint_id);
+        if (compatPayload.type === 'end') {
+          if (compatPayload.checkpoint_id) {
+            setScriptThreadContext(
+              compatPayload.thread_id ?? scriptThreadId,
+              compatPayload.checkpoint_id
+            );
           }
           setWorkflowProgress('conversational_tone', {
             status: 'success',
@@ -189,23 +320,23 @@ export const SourceInput: React.FC = () => {
           return;
         }
 
-        if (payload.type === 'error') {
+        if (compatPayload.type === 'error') {
           setWorkflowProgress('conversational_tone', {
             status: 'error',
             description: '口播脚本生成失败，请检查网络或稍后重试。',
-            lastError: payload.message || '口播脚本生成失败',
+            lastError: compatPayload.message || '口播脚本生成失败',
           });
-          throw new Error(payload.message || '口播稿生成失败');
+          throw new Error(compatPayload.message || '口播稿生成失败');
         }
 
-        if (payload.type === 'updates' && payload.data) {
-          let updateData = payload.data;
+        if (compatPayload.type === 'updates' && compatPayload.data) {
+          let updateData = compatPayload.data as Record<string, any>;
           if (updateData.type === 'updates' && updateData.data) {
-            updateData = updateData.data;
+            updateData = updateData.data as Record<string, any>;
           }
 
           const nodeName = Object.keys(updateData)[0];
-          const nodeData = updateData[nodeName];
+          const nodeData = updateData[nodeName] as Record<string, any> | undefined;
           if (!nodeName || !nodeData) return;
           const presentation = getNodePresentation('conversational_tone', nodeName);
           setWorkflowProgress('conversational_tone', {
@@ -265,101 +396,33 @@ export const SourceInput: React.FC = () => {
     addProcessLog('开始生成分镜、预览和代码。');
 
     try {
-      const response = await fetch('/api/generate_animation_sse', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          source_text: oralScript,
-          thread_id: animationThreadId,
-        }),
+      const session = await createSession({
+        source_type: 'text',
+        source_content: oralScript,
+        title: 'Animation generation',
       });
+      setCurrentSessionContext(session.session_id, session.branch_id);
 
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+      const artifacts = await listBranchArtifacts(session.branch_id);
+      const sourceArtifact = artifacts.items.find(
+        (artifact) => artifact.artifact_type === 'source_document'
+      );
+      if (!sourceArtifact) {
+        throw new Error('未找到 source_document artifact，无法创建视频任务');
       }
 
-      await readSse(response, (payload) => {
-        if (payload.thread_id) {
-          setAnimationThreadContext(payload.thread_id, payload.checkpoint_id ?? undefined);
-        }
-
-        if (payload.progress) {
-          applyServerProgress('animation', payload.progress);
-        }
-
-        if (payload.type === 'progress') {
-          return;
-        }
-
-        if (payload.type === 'setup') {
-          addProcessLog('已连接视频工作流。');
-          return;
-        }
-
-        if (payload.type === 'end') {
-          if (payload.checkpoint_id) {
-            setAnimationThreadContext(
-              payload.thread_id ?? animationThreadId,
-              payload.checkpoint_id
-            );
-          }
-          addProcessLog('视频工作流结束。');
-          return;
-        }
-
-        if (payload.type === 'error') {
-          throw new Error(payload.message || '视频生成失败');
-        }
-
-        if (payload.type === 'updates' && payload.data) {
-          let updateData = payload.data;
-          if (updateData.type === 'updates' && updateData.data) {
-            updateData = updateData.data;
-          }
-
-          const nodeName = Object.keys(updateData)[0];
-          const nodeData = updateData[nodeName];
-          if (!nodeName || !nodeData) return;
-
-          addProcessLog(`节点完成：${nodeName}`);
-
-          if (nodeName === 'director_node' && nodeData.director?.scenes) {
-            const parsedScenes = nodeData.director.scenes.map((scene: any) => ({
-              id: scene.scene_id,
-              durationInFrames: Math.ceil((scene.duration || 5) * 30),
-              componentType: scene.scene_id.replace(/\s+/g, ''),
-              script: scene.script,
-              visual_design: scene.visual_design,
-              marks: scene.animation_marks || {},
-              code:
-                '// 正在等待 Coder Agent 生成代码...\n// 视觉设计要求：\n// ' +
-                scene.visual_design,
-            }));
-            setScenes(parsedScenes);
-            addProcessLog(`已生成 ${parsedScenes.length} 个分镜。`);
-          }
-
-          if (nodeName === 'visual_architect_node' && nodeData.visual_architect) {
-            addProcessLog(
-              '已收到视觉主题配置。',
-              JSON.stringify(nodeData.visual_architect.theme_palette)
-            );
-          }
-
-          if (nodeName === 'coder_node' && nodeData.coder) {
-            const coders = Array.isArray(nodeData.coder) ? nodeData.coder : [nodeData.coder];
-            coders.forEach((coder: any) => {
-              updateSceneCode(coder.scene_id, coder.code);
-              addProcessLog(`代码已返回：${coder.scene_id}`);
-            });
-          }
-        }
+      const task = await createSessionTask(session.session_id, {
+        branch_id: session.branch_id,
+        task_type: 'create_video',
+        request_payload: { source_artifact_id: sourceArtifact.artifact_id },
       });
+      setActiveAnimationTask(task.task_id, task.status);
+      setAnimationThreadContext(task.task_id, null);
+      addProcessLog(`视频任务已创建：${task.task_id}`);
 
-      setAiStatus('idle');
-      addProcessLog('分镜与代码生成完成。');
-      captureAnimationBaseline();
-      setProcessStartTime(null);
+      await streamTaskEvents(task.task_id, {
+        onEvent: applyAnimationTaskEvent,
+      });
     } catch (error) {
       setWorkflowProgress('animation', {
         status: 'error',

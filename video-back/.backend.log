@@ -1,0 +1,407 @@
+INFO:     Will watch for changes in these directories: ['/home/edy/Downloads/视频博文/video-back']
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+INFO:     Started reloader process [887616] using StatReload
+INFO:     Started server process [887619]
+INFO:     Waiting for application startup.
+2026-04-14 16:53:12,719 | INFO | video_back.main | Application startup complete
+INFO:     Application startup complete.
+INFO:     127.0.0.1:45534 - "GET /api/sessions/sess_62ae10f207544cd0ba9144e6c557e7a0/timeline?limit=80&branch_id=br_bd5f908ced8f42ca9b8451e7c00587c5 HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:45536 - "GET /api/branches/br_bd5f908ced8f42ca9b8451e7c00587c5/artifacts HTTP/1.1" 404 Not Found
+2026-04-14 16:54:16,469 | INFO | video_back.api.routes | Generate script requested thread_id=c663a375-6e48-4756-af6f-95133794507c
+INFO:     127.0.0.1:45550 - "POST /api/generate_script_sse HTTP/1.1" 200 OK
+2026-04-14 16:54:16,476 | INFO | video_back.services.workflow_service | Streaming workflow start request_id=0d86c41a-94c2-4dbb-905b-f86ece0fc034 workflow=conversational_tone thread_id=c663a375-6e48-4756-af6f-95133794507c checkpoint_id=None
+2026-04-14 16:54:16,479 | INFO | video_back.workflow.conversational_tone_work_flow | Content writer started loop_count=0
+2026-04-14 16:54:16,481 | INFO | video_back.workflow.conversational_tone_work_flow | Content writer finished loop_count=0
+2026-04-14 16:54:16,482 | INFO | video_back.workflow.conversational_tone_work_flow | Content reviewer started loop_count=0
+2026-04-14 16:54:16,483 | INFO | video_back.workflow.conversational_tone_work_flow | Content reviewer finished score=85 next_loop=1
+2026-04-14 16:54:16,483 | INFO | video_back.workflow.conversational_tone_work_flow | Reviewer flow completed score=85 loop_count=1
+2026-04-14 16:54:16,484 | INFO | video_back.services.workflow_service | Streaming workflow end request_id=0d86c41a-94c2-4dbb-905b-f86ece0fc034 workflow=conversational_tone thread_id=c663a375-6e48-4756-af6f-95133794507c checkpoint_id=1f137df8-4773-6cbf-8002-2a2c2ca56212
+2026-04WARNING:  StatReload detected changes in 'orchestration/workflow_runner.py'. Reloading...
+INFO:     Started server process [889915]
+INFO:     Waiting for application startup.
+ERROR:    Traceback (most recent call last):
+  File "/home/edy/Downloads/视频博文/video-back/.venv/lib/python3.12/site-packages/starlette/routing.py", line 638, in lifespan
+    async with self.lifespan_context(app) as maybe_state:
+  File "/usr/lib/python3.12/contextlib.py", line 210, in __aenter__
+    return await anext(self.gen)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/home/edy/Downloads/视频博文/video-back/.venv/lib/python3.12/site-packages/fastapi/routing.py", line 216, in merged_lifespan
+    async with original_context(app) as maybe_original_state:
+  File "/home/edy/Downloads/视频博文/video-back/.venv/lib/python3.12/site-packages/fastapi/routing.py", line 241, in __aenter__
+    await self._router._startup()
+  File "/home/edy/Downloads/视频博文/video-back/.venv/lib/python3.12/site-packages/fastapi/routing.py", line 4884, in _startup
+    await handler()
+  File "/home/edy/Downloads/视频博文/video-back/main.py", line 24, in on_startup
+    await get_container().start()
+          ^^^^^^^^^^^^^^^
+  File "/home/edy/Downloads/视频博文/video-back/app/dependencies.py", line 72, in get_container
+    _container = AppContainer()
+                 ^^^^^^^^^^^^^^
+  File "/home/edy/Downloads/视频博文/video-back/app/dependencies.py", line 37, in __init__
+    from orchestration.workflow_runner import WorkflowRunner
+  File "/home/edy/Downloads/视频博文/video-back/orchestration/workflow_runner.py", line 7, in <module>
+    from domain.render_jobs.repository import RenderJobRepository
+  File "/home/edy/Downloads/视频博文/video-back/domain/render_jobs/repository.py", line 6, in <module>
+    from sqlalchemy import select
+ModuleNotFoundError: No module named 'sqlalchemy'
+
+ERROR:    Application startup failed. Exiting.
+WARNING:  StatReload detected changes in 'orchestration/workflow_runner.py'. Reloading...
+INFO:     Started server process [890125]
+INFO:     Waiting for application startup.
+ERROR:    Traceback (most recent call last):
+  File "/home/edy/Downloads/视频博文/video-back/.venv/lib/python3.12/site-packages/starlette/routing.py", line 638, in lifespan
+    async with self.lifespan_context(app) as maybe_state:
+  File "/usr/lib/python3.12/contextlib.py", line 210, in __aenter__
+    return await anext(self.gen)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/home/edy/Downloads/视频博文/video-back/.venv/lib/python3.12/site-packages/fastapi/routing.py", line 216, in merged_lifespan
+    async with original_context(app) as maybe_original_state:
+  File "/home/edy/Downloads/视频博文/video-back/.venv/lib/python3.12/site-packages/fastapi/routing.py", line 241, in __aenter__
+    await self._router._startup()
+  File "/home/edy/Downloads/视频博文/video-back/.venv/lib/python3.12/site-packages/fastapi/routing.py", line 4884, in _startup
+    await handler()
+  File "/home/edy/Downloads/视频博文/video-back/main.py", line 24, in on_startup
+    await get_container().start()
+          ^^^^^^^^^^^^^^^
+  File "/home/edy/Downloads/视频博文/video-back/app/dependencies.py", line 72, in get_container
+    _container = AppContainer()
+                 ^^^^^^^^^^^^^^
+  File "/home/edy/Downloads/视频博文/video-back/app/dependencies.py", line 37, in __init__
+    from orchestration.workflow_runner import WorkflowRunner
+  File "/home/edy/Downloads/视频博文/video-back/orchestration/workflow_runner.py", line 7, in <module>
+    from domain.render_jobs.repository import RenderJobRepository
+  File "/home/edy/Downloads/视频博文/video-back/domain/render_jobs/repository.py", line 6, in <module>
+    from sqlalchemy import select
+ModuleNotFoundError: No module named 'sqlalchemy'
+
+ERROR:    Application startup failed. Exiting.
+WARNING:  StatReload detected changes in 'orchestration/workflow_runner.py'. Reloading...
+INFO:     Started server process [891503]
+INFO:     Waiting for application startup.
+ERROR:    Traceback (most recent call last):
+  File "/home/edy/Downloads/视频博文/video-back/.venv/lib/python3.12/site-packages/starlette/routing.py", line 638, in lifespan
+    async with self.lifespan_context(app) as maybe_state:
+  File "/usr/lib/python3.12/contextlib.py", line 210, in __aenter__
+    return await anext(self.gen)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/home/edy/Downloads/视频博文/video-back/.venv/lib/python3.12/site-packages/fastapi/routing.py", line 216, in merged_lifespan
+    async with original_context(app) as maybe_original_state:
+  File "/home/edy/Downloads/视频博文/video-back/.venv/lib/python3.12/site-packages/fastapi/routing.py", line 241, in __aenter__
+    await self._router._startup()
+  File "/home/edy/Downloads/视频博文/video-back/.venv/lib/python3.12/site-packages/fastapi/routing.py", line 4884, in _startup
+    await handler()
+  File "/home/edy/Downloads/视频博文/video-back/main.py", line 24, in on_startup
+    await get_container().start()
+          ^^^^^^^^^^^^^^^
+  File "/home/edy/Downloads/视频博文/video-back/app/dependencies.py", line 72, in get_container
+    _container = AppContainer()
+                 ^^^^^^^^^^^^^^
+  File "/home/edy/Downloads/视频博文/video-back/app/dependencies.py", line 37, in __init__
+    from orchestration.workflow_runner import WorkflowRunner
+  File "/home/edy/Downloads/视频博文/video-back/orchestration/workflow_runner.py", line 7, in <module>
+    from domain.render_jobs.repository import RenderJobRepository
+  File "/home/edy/Downloads/视频博文/video-back/domain/render_jobs/repository.py", line 6, in <module>
+    from sqlalchemy import select
+ModuleNotFoundError: No module named 'sqlalchemy'
+
+ERROR:    Application startup failed. Exiting.
+WARNING:  StatReload detected changes in 'orchestration/workflow_runner.py'. Reloading...
+INFO:     Started server process [891556]
+INFO:     Waiting for application startup.
+ERROR:    Traceback (most recent call last):
+  File "/home/edy/Downloads/视频博文/video-back/.venv/lib/python3.12/site-packages/starlette/routing.py", line 638, in lifespan
+    async with self.lifespan_context(app) as maybe_state:
+  File "/usr/lib/python3.12/contextlib.py", line 210, in __aenter__
+    return await anext(self.gen)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/home/edy/Downloads/视频博文/video-back/.venv/lib/python3.12/site-packages/fastapi/routing.py", line 216, in merged_lifespan
+    async with original_context(app) as maybe_original_state:
+  File "/home/edy/Downloads/视频博文/video-back/.venv/lib/python3.12/site-packages/fastapi/routing.py", line 241, in __aenter__
+    await self._router._startup()
+  File "/home/edy/Downloads/视频博文/video-back/.venv/lib/python3.12/site-packages/fastapi/routing.py", line 4884, in _startup
+    await handler()
+  File "/home/edy/Downloads/视频博文/video-back/main.py", line 24, in on_startup
+    await get_container().start()
+          ^^^^^^^^^^^^^^^
+  File "/home/edy/Downloads/视频博文/video-back/app/dependencies.py", line 72, in get_container
+    _container = AppContainer()
+                 ^^^^^^^^^^^^^^
+  File "/home/edy/Downloads/视频博文/video-back/app/dependencies.py", line 37, in __init__
+    from orchestration.workflow_runner import WorkflowRunner
+  File "/home/edy/Downloads/视频博文/video-back/orchestration/workflow_runner.py", line 7, in <module>
+    from domain.render_jobs.repository import RenderJobRepository
+  File "/home/edy/Downloads/视频博文/video-back/domain/render_jobs/repository.py", line 6, in <module>
+    from sqlalchemy import select
+ModuleNotFoundError: No module named 'sqlalchemy'
+
+ERROR:    Application startup failed. Exiting.
+WARNING:  StatReload detected changes in 'orchestration/workflow_runner.py'. Reloading...
+INFO:     Started server process [893103]
+INFO:     Waiting for application startup.
+ERROR:    Traceback (most recent call last):
+  File "/home/edy/Downloads/视频博文/video-back/.venv/lib/python3.12/site-packages/starlette/routing.py", line 638, in lifespan
+    async with self.lifespan_context(app) as maybe_state:
+  File "/usr/lib/python3.12/contextlib.py", line 210, in __aenter__
+    return await anext(self.gen)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/home/edy/Downloads/视频博文/video-back/.venv/lib/python3.12/site-packages/fastapi/routing.py", line 216, in merged_lifespan
+    async with original_context(app) as maybe_original_state:
+  File "/home/edy/Downloads/视频博文/video-back/.venv/lib/python3.12/site-packages/fastapi/routing.py", line 241, in __aenter__
+    await self._router._startup()
+  File "/home/edy/Downloads/视频博文/video-back/.venv/lib/python3.12/site-packages/fastapi/routing.py", line 4884, in _startup
+    await handler()
+  File "/home/edy/Downloads/视频博文/video-back/main.py", line 24, in on_startup
+    await get_container().start()
+          ^^^^^^^^^^^^^^^
+  File "/home/edy/Downloads/视频博文/video-back/app/dependencies.py", line 72, in get_container
+    _container = AppContainer()
+                 ^^^^^^^^^^^^^^
+  File "/home/edy/Downloads/视频博文/video-back/app/dependencies.py", line 37, in __init__
+    from orchestration.workflow_runner import WorkflowRunner
+  File "/home/edy/Downloads/视频博文/video-back/orchestration/workflow_runner.py", line 7, in <module>
+    from domain.render_jobs.repository import RenderJobRepository
+  File "/home/edy/Downloads/视频博文/video-back/domain/render_jobs/repository.py", line 6, in <module>
+    from sqlalchemy import select
+ModuleNotFoundError: No module named 'sqlalchemy'
+
+ERROR:    Application startup failed. Exiting.
+WARNING:  StatReload detected changes in 'orchestration/workflow_runner.py'. Reloading...
+INFO:     Started server process [893182]
+INFO:     Waiting for application startup.
+ERROR:    Traceback (most recent call last):
+  File "/home/edy/Downloads/视频博文/video-back/.venv/lib/python3.12/site-packages/starlette/routing.py", line 638, in lifespan
+    async with self.lifespan_context(app) as maybe_state:
+  File "/usr/lib/python3.12/contextlib.py", line 210, in __aenter__
+    return await anext(self.gen)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/home/edy/Downloads/视频博文/video-back/.venv/lib/python3.12/site-packages/fastapi/routing.py", line 216, in merged_lifespan
+    async with original_context(app) as maybe_original_state:
+  File "/home/edy/Downloads/视频博文/video-back/.venv/lib/python3.12/site-packages/fastapi/routing.py", line 241, in __aenter__
+    await self._router._startup()
+  File "/home/edy/Downloads/视频博文/video-back/.venv/lib/python3.12/site-packages/fastapi/routing.py", line 4884, in _startup
+    await handler()
+  File "/home/edy/Downloads/视频博文/video-back/main.py", line 24, in on_startup
+    await get_container().start()
+          ^^^^^^^^^^^^^^^
+  File "/home/edy/Downloads/视频博文/video-back/app/dependencies.py", line 72, in get_container
+    _container = AppContainer()
+                 ^^^^^^^^^^^^^^
+  File "/home/edy/Downloads/视频博文/video-back/app/dependencies.py", line 37, in __init__
+    from orchestration.workflow_runner import WorkflowRunner
+  File "/home/edy/Downloads/视频博文/video-back/orchestration/workflow_runner.py", line 7, in <module>
+    from domain.render_jobs.repository import RenderJobRepository
+  File "/home/edy/Downloads/视频博文/video-back/domain/render_jobs/repository.py", line 6, in <module>
+    from sqlalchemy import select
+ModuleNotFoundError: No module named 'sqlalchemy'
+
+ERROR:    Application startup failed. Exiting.
+WARNING:  StatReload detected changes in 'orchestration/workflow_runner.py'. Reloading...
+INFO:     Started server process [893366]
+INFO:     Waiting for application startup.
+ERROR:    Traceback (most recent call last):
+  File "/home/edy/Downloads/视频博文/video-back/.venv/lib/python3.12/site-packages/starlette/routing.py", line 638, in lifespan
+    async with self.lifespan_context(app) as maybe_state:
+  File "/usr/lib/python3.12/contextlib.py", line 210, in __aenter__
+    return await anext(self.gen)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/home/edy/Downloads/视频博文/video-back/.venv/lib/python3.12/site-packages/fastapi/routing.py", line 216, in merged_lifespan
+    async with original_context(app) as maybe_original_state:
+  File "/home/edy/Downloads/视频博文/video-back/.venv/lib/python3.12/site-packages/fastapi/routing.py", line 241, in __aenter__
+    await self._router._startup()
+  File "/home/edy/Downloads/视频博文/video-back/.venv/lib/python3.12/site-packages/fastapi/routing.py", line 4884, in _startup
+    await handler()
+  File "/home/edy/Downloads/视频博文/video-back/main.py", line 24, in on_startup
+    await get_container().start()
+          ^^^^^^^^^^^^^^^
+  File "/home/edy/Downloads/视频博文/video-back/app/dependencies.py", line 72, in get_container
+    _container = AppContainer()
+                 ^^^^^^^^^^^^^^
+  File "/home/edy/Downloads/视频博文/video-back/app/dependencies.py", line 37, in __init__
+    from orchestration.workflow_runner import WorkflowRunner
+  File "/home/edy/Downloads/视频博文/video-back/orchestration/workflow_runner.py", line 7, in <module>
+    from domain.render_jobs.repository import RenderJobRepository
+  File "/home/edy/Downloads/视频博文/video-back/domain/render_jobs/repository.py", line 6, in <module>
+    from sqlalchemy import select
+ModuleNotFoundError: No module named 'sqlalchemy'
+
+ERROR:    Application startup failed. Exiting.
+WARNING:  StatReload detected changes in 'domain/artifacts/service.py'. Reloading...
+INFO:     Started server process [897051]
+INFO:     Waiting for application startup.
+ERROR:    Traceback (most recent call last):
+  File "/home/edy/Downloads/视频博文/video-back/.venv/lib/python3.12/site-packages/starlette/routing.py", line 638, in lifespan
+    async with self.lifespan_context(app) as maybe_state:
+  File "/usr/lib/python3.12/contextlib.py", line 210, in __aenter__
+    return await anext(self.gen)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/home/edy/Downloads/视频博文/video-back/.venv/lib/python3.12/site-packages/fastapi/routing.py", line 216, in merged_lifespan
+    async with original_context(app) as maybe_original_state:
+  File "/home/edy/Downloads/视频博文/video-back/.venv/lib/python3.12/site-packages/fastapi/routing.py", line 241, in __aenter__
+    await self._router._startup()
+  File "/home/edy/Downloads/视频博文/video-back/.venv/lib/python3.12/site-packages/fastapi/routing.py", line 4884, in _startup
+    await handler()
+  File "/home/edy/Downloads/视频博文/video-back/main.py", line 24, in on_startup
+    await get_container().start()
+          ^^^^^^^^^^^^^^^
+  File "/home/edy/Downloads/视频博文/video-back/app/dependencies.py", line 72, in get_container
+    _container = AppContainer()
+                 ^^^^^^^^^^^^^^
+  File "/home/edy/Downloads/视频博文/video-back/app/dependencies.py", line 37, in __init__
+    from orchestration.workflow_runner import WorkflowRunner
+  File "/home/edy/Downloads/视频博文/video-back/orchestration/workflow_runner.py", line 7, in <module>
+    from domain.render_jobs.repository import RenderJobRepository
+  File "/home/edy/Downloads/视频博文/video-back/domain/render_jobs/repository.py", line 6, in <module>
+    from sqlalchemy import select
+ModuleNotFoundError: No module named 'sqlalchemy'
+
+ERROR:    Application startup failed. Exiting.
+WARNING:  StatReload detected changes in 'orchestration/workflow_runner.py'. Reloading...
+INFO:     Started server process [902416]
+INFO:     Waiting for application startup.
+ERROR:    Traceback (most recent call last):
+  File "/home/edy/Downloads/视频博文/video-back/.venv/lib/python3.12/site-packages/starlette/routing.py", line 638, in lifespan
+    async with self.lifespan_context(app) as maybe_state:
+  File "/usr/lib/python3.12/contextlib.py", line 210, in __aenter__
+    return await anext(self.gen)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/home/edy/Downloads/视频博文/video-back/.venv/lib/python3.12/site-packages/fastapi/routing.py", line 216, in merged_lifespan
+    async with original_context(app) as maybe_original_state:
+  File "/home/edy/Downloads/视频博文/video-back/.venv/lib/python3.12/site-packages/fastapi/routing.py", line 241, in __aenter__
+    await self._router._startup()
+  File "/home/edy/Downloads/视频博文/video-back/.venv/lib/python3.12/site-packages/fastapi/routing.py", line 4884, in _startup
+    await handler()
+  File "/home/edy/Downloads/视频博文/video-back/main.py", line 24, in on_startup
+    await get_container().start()
+          ^^^^^^^^^^^^^^^
+  File "/home/edy/Downloads/视频博文/video-back/app/dependencies.py", line 72, in get_container
+    _container = AppContainer()
+                 ^^^^^^^^^^^^^^
+  File "/home/edy/Downloads/视频博文/video-back/app/dependencies.py", line 37, in __init__
+    from orchestration.workflow_runner import WorkflowRunner
+  File "/home/edy/Downloads/视频博文/video-back/orchestration/workflow_runner.py", line 7, in <module>
+    from domain.render_jobs.repository import RenderJobRepository
+  File "/home/edy/Downloads/视频博文/video-back/domain/render_jobs/repository.py", line 6, in <module>
+    from sqlalchemy import select
+ModuleNotFoundError: No module named 'sqlalchemy'
+
+ERROR:    Application startup failed. Exiting.
+WARNING:  StatReload detected changes in 'orchestration/workflow_runner.py'. Reloading...
+INFO:     Started server process [902524]
+INFO:     Waiting for application startup.
+ERROR:    Traceback (most recent call last):
+  File "/home/edy/Downloads/视频博文/video-back/.venv/lib/python3.12/site-packages/starlette/routing.py", line 638, in lifespan
+    async with self.lifespan_context(app) as maybe_state:
+  File "/usr/lib/python3.12/contextlib.py", line 210, in __aenter__
+    return await anext(self.gen)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/home/edy/Downloads/视频博文/video-back/.venv/lib/python3.12/site-packages/fastapi/routing.py", line 216, in merged_lifespan
+    async with original_context(app) as maybe_original_state:
+  File "/home/edy/Downloads/视频博文/video-back/.venv/lib/python3.12/site-packages/fastapi/routing.py", line 241, in __aenter__
+    await self._router._startup()
+  File "/home/edy/Downloads/视频博文/video-back/.venv/lib/python3.12/site-packages/fastapi/routing.py", line 4884, in _startup
+    await handler()
+  File "/home/edy/Downloads/视频博文/video-back/main.py", line 24, in on_startup
+    await get_container().start()
+          ^^^^^^^^^^^^^^^
+  File "/home/edy/Downloads/视频博文/video-back/app/dependencies.py", line 72, in get_container
+    _container = AppContainer()
+                 ^^^^^^^^^^^^^^
+  File "/home/edy/Downloads/视频博文/video-back/app/dependencies.py", line 37, in __init__
+    from orchestration.workflow_runner import WorkflowRunner
+  File "/home/edy/Downloads/视频博文/video-back/orchestration/workflow_runner.py", line 7, in <module>
+    from domain.render_jobs.repository import RenderJobRepository
+  File "/home/edy/Downloads/视频博文/video-back/domain/render_jobs/repository.py", line 6, in <module>
+    from sqlalchemy import select
+ModuleNotFoundError: No module named 'sqlalchemy'
+
+ERROR:    Application startup failed. Exiting.
+�引发兴趣，因此需要一个引导下一步行动的号召。 |
+
+### 2. **确定视觉层级**
+1.  **HeroTitle (主标题)**：首先呈现核心问题，抓住眼球。
+2.  **BodyCard (引子文字)**：紧接着补充标题的语境，引导观众进入思考状态。
+3.  **StatPanel (数据点)**：将抽象概念“成千上万”具体化、视觉化，强化问题的挑战性。
+4.  **CalloutBox (行动号召)**：最后提供解决方案的入口，完成从提出问题到引导探索的闭环。
+
+### 3. **总结核心信息**
+通过提出一个关于海量货物精准管理的挑战性问题，引发观众对现代智能仓储技术的好奇与关注。
+
+### 4. **判断情感基调**
+**Professional (专业)** 与 **neutral (中性)** 结合。脚本以设问方式探讨一个商业运营中的专业问题，语气理性、带有探究性，旨在启发思考而非渲染情绪。
+For troubleshooting, visit: https://docs.langchain.com/oss/python/langchain/errors/OUTPUT_PARSING_FAILURE 
+2026-04-14 16:55:53,946 | INFO | video_back.utils.structured_output | Structured invoke start operation=semantic_intent_extract:Scene 1 method=function_calling
+2026-04-14 16:56:06,378 | INFO | video_back.utils.structured_output | Structured invoke success operation=semantic_intent_extract:Scene 1 method=function_calling
+2026-04-14 16:56:06,380 | INFO | video_back.utils.structured_output | Structured invoke start operation=layout_design:Scene 1 method=json_schema
+INFO:     127.0.0.1:60446 - "GET /api/sessions/sess_ffb47d9a42594ad9addc781c5f9b50a6/timeline?limit=80&branch_id=br_b82b514fd4ff49f1acc7377a1f7b4329 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60452 - "GET /api/branches/br_b82b514fd4ff49f1acc7377a1f7b4329/artifacts HTTP/1.1" 200 OK
+2026-04-14 16:57:12,873 | INFO | video_back.utils.structured_output | Structured invoke success operation=layout_design:Scene 1 method=json_schema
+2026-04-14 16:57:12,873 | INFO | video_back.orchestration.workflow_runner | [Workflow] Scene Scene 1 layout SUCCESS (Intent: llm, Layout: llm)
+2026-04-14 16:57:12,873 | INFO | video_back.utils.structured_output | Structured invoke start operation=semantic_intent_extract:Scene 2 method=json_schema
+2026-04-14 16:57:26,543 | WARNING | video_back.utils.structured_output | Structured invoke failed operation=semantic_intent_extract:Scene 2 method=json_schema error=Invalid json output: ### 1. **提取视觉元素**
+
+| element_type | text | importance | primitive_type | preferred_region | reasoning |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| title | 秘密，藏在一张“入库单”里 | 100 | HeroTitle | center | 这是脚本的核心陈述，是信息焦点，应作为视觉中心。 |
+| subtitle | 关键证据往往隐藏在看似普通的文件中 | 75 | BodyCard | bottom | 对主标题进行解释和深化，提供背景信息，引导观众思考。 |
+| quote | “入库单” | 85 | CalloutBox | middle | 脚本中唯一被强调的具体物件，是“秘密”的载体，需要视觉突出。 |
+
+### 2. **视觉层级（观看顺序）**
+1.  **主标题 (HeroTitle)**：首先吸引注意力，点明核心悬念。
+2.  **强调文字 (CalloutBox)**：紧接着突出“入库单”这个关键线索，将悬念具体化。
+3.  **副标题 (BodyCard)**：最后提供解释性文字，完成信息传递，引导观众理解深层含义。
+
+### 3. **核心信息**
+一张看似平常的“入库单”，是揭开整个秘密的关键证据。
+
+### 4. **情感基调**
+**Urgent (紧迫)** 与 **Professional (专业)** 的结合。
+- **紧迫感**：源于“秘密”一词带来的悬念和探究感，暗示有重要信息亟待发现。
+- **专业性**：源于“入库单”这一具体的、带有记录和凭证性质的文件，暗示这是一个需要细致分析和推理的场景。
+For troubleshooting, visit: https://docs.langchain.com/oss/python/langchain/errors/OUTPUT_PARSING_FAILURE 
+2026-04-14 16:57:26,543 | INFO | video_back.utils.structured_output | Structured invoke start operation=semantic_intent_extract:Scene 2 method=function_calling
+2026-04-14 16:57:38,756 | INFO | video_back.utils.structured_output | Structured invoke success operation=semantic_intent_extract:Scene 2 method=function_calling
+2026-04-14 16:57:38,756 | INFO | video_back.utils.structured_output | Structured invoke start operation=layout_design:Scene 2 method=json_schema
+2026-04-14 16:58:10,552 | INFO | video_back.utils.structured_output | Structured invoke success operation=layout_design:Scene 2 method=json_schema
+2026-04-14 16:58:10,553 | INFO | video_back.orchestration.workflow_runner | [Workflow] Scene Scene 2 layout SUCCESS (Intent: llm, Layout: llm)
+2026-04-14 16:58:10,553 | INFO | video_back.utils.structured_output | Structured invoke start operation=semantic_intent_extract:Scene 3 method=json_schema
+WARNING:  StatReload detected changes in 'orchestration/workflow_runner.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+2026-04-14 16:58:12,449 | INFO | video_back.main | Application shutdown complete
+INFO:     Application shutdown complete.
+INFO:     Finished server process [887619]
+INFO:     Started server process [889916]
+INFO:     Waiting for application startup.
+2026-04-14 16:58:13,340 | INFO | video_back.main | Application startup complete
+INFO:     Application startup complete.
+WARNING:  StatReload detected changes in 'orchestration/workflow_runner.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+2026-04-14 16:58:42,410 | INFO | video_back.main | Application shutdown complete
+INFO:     Application shutdown complete.
+INFO:     Finished server process [889916]
+INFO:     Started server process [890126]
+INFO:     Waiting for application startup.
+2026-04-14 16:58:43,305 | INFO | video_back.main | Application startup complete
+INFO:     Application startup complete.
+WARNING:  StatReload detected changes in 'orchestration/workflow_runner.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+2026-04-14 17:01:26,542 | INFO | video_back.main | Application shutdown complete
+INFO:     Application shutdown complete.
+INFO:     Finished server process [890126]
+INFO:     Started server process [891504]
+INFO:     Waiting for application startup.
+2026-04-14 17:01:27,420 | INFO | video_back.main | Application startup complete
+INFO:     Application startup complete.
+WARNING:  StatReload detected changes in 'orchestration/workflow_runner.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+2026-04-14 17:01:36,142 | INFO | video_back.main | Application shutdown complete
+INFO:     Application shutdown complete.
+INFO:     Finished server process [891504]
+INFO:     Started server process [891557]
+INFO:     Waiting for application startup.
+2026-04-14 17:01:37,026 | INFO | video_back.main | Application startup complete
+INFO:     Application startup complete.

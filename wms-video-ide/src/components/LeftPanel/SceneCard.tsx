@@ -1,5 +1,5 @@
-import React, { useCallback } from 'react';
-import { Clock } from 'lucide-react';
+import React, { useCallback, useMemo } from 'react';
+import { AlertTriangle, CheckCircle2, Clock, Layers3, LayoutTemplate } from 'lucide-react';
 import type { Scene } from '../../types/scene';
 import { DraggableMark } from './DraggableMark';
 
@@ -17,6 +17,21 @@ export const SceneCard: React.FC<SceneCardProps> = React.memo(
     const estimatedSec = scene.script.replace(/\s/g, '').length / 4;
     const durationSec = scene.durationInFrames / 30;
     const isTooLong = estimatedSec > durationSec;
+    const hasValidationError = scene.validationReport
+      ? scene.validationReport.passed === false ||
+        Number(scene.validationReport.error_count ?? 0) > 0 ||
+        Array.isArray(scene.validationReport.failed_scenes)
+      : false;
+    const sceneStatus = scene.status || 'draft';
+    const statusTone = useMemo(() => {
+      if (sceneStatus === 'failed' || hasValidationError) {
+        return 'bg-red-500/10 text-red-300 border-red-500/20';
+      }
+      if (sceneStatus === 'ready') {
+        return 'bg-emerald-500/10 text-emerald-300 border-emerald-500/20';
+      }
+      return 'bg-amber-500/10 text-amber-300 border-amber-500/20';
+    }, [hasValidationError, sceneStatus]);
     const sortedMarks = Object.entries(scene.marks).sort(
       (a, b) => a[1] - b[1] || a[0].localeCompare(b[0])
     );
@@ -64,6 +79,43 @@ export const SceneCard: React.FC<SceneCardProps> = React.memo(
                     文案超长
                   </span>
                 )}
+                <span
+                  className={`rounded border px-2 py-1 text-[11px] font-mono ${statusTone}`}
+                >
+                  {sceneStatus}
+                </span>
+              </div>
+              <div className="mt-2 flex flex-wrap items-center gap-2 text-[10px] font-mono text-gray-500">
+                {scene.version ? (
+                  <span className="flex items-center gap-1 rounded bg-gray-900 px-2 py-1">
+                    <Layers3 className="h-3 w-3" />
+                    v{scene.version}
+                  </span>
+                ) : null}
+                {scene.sceneArtifactId ? (
+                  <span className="rounded bg-gray-900 px-2 py-1">
+                    {scene.sceneArtifactId.slice(0, 12)}...
+                  </span>
+                ) : (
+                  <span className="rounded bg-gray-900 px-2 py-1">待持久化</span>
+                )}
+                {hasValidationError ? (
+                  <span className="flex items-center gap-1 rounded bg-red-500/10 px-2 py-1 text-red-300">
+                    <AlertTriangle className="h-3 w-3" />
+                    校验异常
+                  </span>
+                ) : sceneStatus === 'ready' ? (
+                  <span className="flex items-center gap-1 rounded bg-emerald-500/10 px-2 py-1 text-emerald-300">
+                    <CheckCircle2 className="h-3 w-3" />
+                    可编辑
+                  </span>
+                ) : null}
+                {scene.layout_spec && (
+                  <span className="flex items-center gap-1 rounded bg-violet-500/10 px-2 py-1 text-violet-300 animate-pulse">
+                    <LayoutTemplate className="h-3 w-3" />
+                    AI 布局已就绪
+                  </span>
+                )}
               </div>
               <p
                 className={`mt-2 line-clamp-3 break-words text-[12px] leading-relaxed ${
@@ -102,6 +154,19 @@ export const SceneCard: React.FC<SceneCardProps> = React.memo(
             <span>预计旁白 {estimatedSec.toFixed(1)}s</span>
             <span>镜头时长 {durationSec.toFixed(1)}s</span>
           </div>
+          {scene.validationReport && (
+            <div
+              className={`mt-2 rounded border px-2 py-1 text-[11px] ${
+                hasValidationError
+                  ? 'border-red-500/20 bg-red-500/10 text-red-200'
+                  : 'border-emerald-500/20 bg-emerald-500/10 text-emerald-200'
+              }`}
+            >
+              {hasValidationError
+                ? `校验异常 ${String(scene.validationReport.error_count ?? 1)} 项`
+                : '校验通过'}
+            </div>
+          )}
         </div>
 
         <div className="rhythm-track relative h-12 border-t border-gray-800/50 bg-black/40">

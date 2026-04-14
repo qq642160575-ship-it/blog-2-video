@@ -3,6 +3,12 @@ import type { IdeState } from './useIdeStore';
 
 const EMPTY_SCENE: Scene = {
   id: '',
+  sceneArtifactId: null,
+  artifactId: null,
+  version: 1,
+  status: 'draft',
+  validationReport: null,
+  previewImageUrl: null,
   durationInFrames: 150,
   componentType: 'Scene',
   script: '',

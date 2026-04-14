@@ -1,3 +1,4 @@
+import asyncio
 import json
 from typing import Any, Type
 
@@ -68,14 +69,41 @@ def invoke_structured(
             validated = result if isinstance(result, schema) else schema.model_validate(normalized)
             logger.info("Structured invoke success operation=%s method=%s", operation, method)
             return validated
-        except Exception:
-            logger.exception("Structured invoke failed operation=%s method=%s", operation, method)
+        except Exception as e:
+            logger.warning("Structured invoke failed operation=%s method=%s error=%s", operation, method, str(e))
+            continue
 
     logger.warning("Falling back to raw JSON parsing operation=%s", operation)
-    raw_response = model.invoke(messages)
-    raw_text = _extract_text_content(raw_response)
-    json_block = _extract_json_block(raw_text)
-    parsed = json.loads(json_block)
-    validated = schema.model_validate(parsed)
-    logger.info("Structured invoke success operation=%s method=raw_json_fallback", operation)
-    return validated
+    try:
+        raw_response = model.invoke(messages)
+        raw_text = _extract_text_content(raw_response)
+        json_block = _extract_json_block(raw_text)
+        parsed = json.loads(json_block)
+        validated = schema.model_validate(parsed)
+        logger.info("Structured invoke success operation=%s method=raw_json_fallback", operation)
+        return validated
+    except Exception as e:
+        logger.error("Raw JSON fallback failed operation=%s error=%s", operation, str(e))
+        raise ValueError(f"Failed to parse structured output for {operation}: {str(e)}") from e
+
+
+async def ainvoke_structured(
+    *,
+    model: Any,
+    schema: Type[BaseModel],
+    messages: list[Any],
+    operation: str,
+) -> BaseModel:
+    """invoke_structured 的异步版本。
+
+    使用 asyncio.to_thread 将同步的 LLM 调用放入线程池，
+    确保 asyncio 事件循环在 LLM 等待期间不被阻塞，
+    从而使 SSE/WebSocket 等实时推送能正常工作。
+    """
+    return await asyncio.to_thread(
+        invoke_structured,
+        model=model,
+        schema=schema,
+        messages=messages,
+        operation=operation,
+    )

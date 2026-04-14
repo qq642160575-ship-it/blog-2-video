@@ -1,6 +1,9 @@
 import { create } from 'zustand';
 import type { Scene } from '../types/scene';
 import type { WorkflowHistoryItem, WorkflowName } from '../types/workflow';
+import type { TaskEventRecord } from '../types/event';
+import type { TaskRecord, TaskStatus } from '../types/task';
+import type { ArtifactResponse } from '../types/artifact';
 import {
   createDefaultWorkflowProgress,
   type WorkflowProgress,
@@ -19,6 +22,12 @@ export interface IdeState {
   rewriteStatus: RewriteStatus;
   processLogs: { time: string; content: string; details?: string }[];
   processStartTime: number | null;
+  currentSessionId: string | null;
+  currentBranchId: string | null;
+  activeAnimationTaskId: string | null;
+  activeAnimationTaskStatus: TaskStatus | null;
+  taskEventsByTaskId: Record<string, TaskEventRecord[]>;
+  tasksById: Record<string, TaskRecord>;
   scriptThreadId: string | null;
   scriptCheckpointId: string | null;
   animationThreadId: string | null;
@@ -29,12 +38,20 @@ export interface IdeState {
   workflowProgressByName: Record<WorkflowName, WorkflowProgress>;
   scriptBaseline: { sourceText: string; oralScript: string } | null;
   animationBaseline: string;
+  // 新增：artifacts 状态管理
+  artifactsByType: Record<string, ArtifactResponse | null>;
+  sceneCodeBySceneId: Record<string, string>;
   setSourceText: (text: string) => void;
   setOralScript: (text: string) => void;
   setScenes: (scenes: Scene[]) => void;
   setActiveScene: (id: string) => void;
   setAiStatus: (status: AiStatus) => void;
   setRewriteStatus: (status: RewriteStatus) => void;
+  setCurrentSessionContext: (sessionId: string | null, branchId?: string | null) => void;
+  setActiveAnimationTask: (taskId: string | null, status?: TaskStatus | null) => void;
+  setTaskRecord: (task: TaskRecord) => void;
+  setActiveAnimationTaskStatus: (status: TaskStatus | null) => void;
+  appendTaskEvent: (event: TaskEventRecord) => void;
   setScriptThreadContext: (threadId: string | null, checkpointId?: string | null) => void;
   setAnimationThreadContext: (threadId: string | null, checkpointId?: string | null) => void;
   setHistoryWorkflow: (workflow: WorkflowName | null) => void;
@@ -48,6 +65,7 @@ export interface IdeState {
   captureScriptBaseline: () => void;
   captureAnimationBaseline: () => void;
   updateSceneCode: (id: string, newCode: string) => void;
+  patchScene: (id: string, patch: Partial<Scene>) => void;
   updateSceneDuration: (id: string, durationInFrames: number) => void;
   updateSceneMark: (sceneId: string, markKey: string, newFrame: number) => void;
   updateSceneScript: (id: string, newScript: string, newDesign: string) => void;
@@ -55,6 +73,10 @@ export interface IdeState {
   clearProcessLogs: () => void;
   setProcessStartTime: (time: number | null) => void;
   loadHistory: (workflow: WorkflowName) => Promise<void>;
+  // 新增：artifact 管理方法
+  setArtifact: (artifactType: string, artifact: ArtifactResponse) => void;
+  setSceneCode: (sceneId: string, code: string) => void;
+  clearArtifacts: () => void;
 }
 
 const DEFAULT_SOURCE_TEXT =
@@ -100,6 +122,12 @@ export const useIdeStore = create<IdeState>((set, get) => ({
   rewriteStatus: 'idle',
   processLogs: [],
   processStartTime: null,
+  currentSessionId: null,
+  currentBranchId: null,
+  activeAnimationTaskId: null,
+  activeAnimationTaskStatus: null,
+  taskEventsByTaskId: {},
+  tasksById: {},
   scriptThreadId: null,
   scriptCheckpointId: null,
   animationThreadId: null,
@@ -119,6 +147,9 @@ export const useIdeStore = create<IdeState>((set, get) => ({
   },
   scriptBaseline: null,
   animationBaseline: '[]',
+  // 新增：artifacts 初始状态
+  artifactsByType: {},
+  sceneCodeBySceneId: {},
 
   setSourceText: (text) => set({ sourceText: text }),
   setOralScript: (text) => set({ oralScript: text }),
@@ -129,6 +160,28 @@ export const useIdeStore = create<IdeState>((set, get) => ({
   setActiveScene: (id) => set({ activeSceneId: id }),
   setAiStatus: (status) => set({ aiStatus: status }),
   setRewriteStatus: (status) => set({ rewriteStatus: status }),
+  setCurrentSessionContext: (sessionId, branchId = null) =>
+    set((state) => ({
+      currentSessionId: sessionId,
+      currentBranchId: branchId ?? state.currentBranchId,
+    })),
+  setActiveAnimationTask: (taskId, status = null) =>
+    set({ activeAnimationTaskId: taskId, activeAnimationTaskStatus: status }),
+  setTaskRecord: (task) =>
+    set((state) => ({
+      tasksById: {
+        ...state.tasksById,
+        [task.id]: task,
+      },
+    })),
+  setActiveAnimationTaskStatus: (status) => set({ activeAnimationTaskStatus: status }),
+  appendTaskEvent: (event) =>
+    set((state) => ({
+      taskEventsByTaskId: {
+        ...state.taskEventsByTaskId,
+        [event.task_id]: [...(state.taskEventsByTaskId[event.task_id] ?? []), event],
+      },
+    })),
   setScriptThreadContext: (threadId, checkpointId = null) =>
     set((state) => ({
       scriptThreadId: threadId,
@@ -191,6 +244,13 @@ export const useIdeStore = create<IdeState>((set, get) => ({
     set((state) => ({
       scenes: state.scenes.map((scene) =>
         scene.id === id ? { ...scene, code: newCode } : scene
+      ),
+    })),
+
+  patchScene: (id, patch) =>
+    set((state) => ({
+      scenes: state.scenes.map((scene) =>
+        scene.id === id ? normalizeScene({ ...scene, ...patch }) : scene
       ),
     })),
 
@@ -259,4 +319,27 @@ export const useIdeStore = create<IdeState>((set, get) => ({
       }));
     }
   },
+
+  // 新增：artifact 管理方法实现
+  setArtifact: (artifactType, artifact) =>
+    set((state) => ({
+      artifactsByType: {
+        ...state.artifactsByType,
+        [artifactType]: artifact,
+      },
+    })),
+
+  setSceneCode: (sceneId, code) =>
+    set((state) => ({
+      sceneCodeBySceneId: {
+        ...state.sceneCodeBySceneId,
+        [sceneId]: code,
+      },
+    })),
+
+  clearArtifacts: () =>
+    set({
+      artifactsByType: {},
+      sceneCodeBySceneId: {},
+    }),
 }));

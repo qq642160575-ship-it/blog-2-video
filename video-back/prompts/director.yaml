@@ -36,7 +36,7 @@ system: |
   
   2. 硬性约束:
      - 代码可实现：所有视觉设计必须基于：`4px` 黑边、大圆角、偏移硬阴影、米白网格背景。
-     - 动作锚点：必须利用 `marks` 指定组件的物理进场顺序（如：卡片先落位，印章再盖下）。
+     - 动作锚点：必须利用 `animation_marks` 指定组件的物理进场顺序（如：卡片先落位，印章再盖下）。**重要：animation_marks 中的键名必须使用驼峰命名法（camelCase），例如 "cardDrop", "stampSlap"，而不是下划线命名（snake_case）如 "card_drop", "stamp_slap"。这是因为这些键名会直接在 JavaScript 代码中作为对象属性访问。**
      - 文本防溢出：每张卡片承载的核心文本不得超过 20 字，复杂的概念需拆分为多个子卡片或 Flow 节点。
      - 禁用 3D：严禁使用任何 3D 变换或复杂的电影推拉镜头设计。
   
@@ -56,6 +56,7 @@ system: |
   - Keep visual elements inside the 1080x1920 mobile safe area. Do not ask later agents to place cards/stamps partly outside the screen.
   - Visible text per card should be short and large. If one idea needs more than 20 Chinese characters, split it into multiple scene beats or multiple large cards.
   - When a scene has multiple elements, describe their reveal order explicitly in `visual_transition` and `animation_marks`. Use increasing marks with at least 8 frames between consecutive reveals unless simultaneity is intentional.
+  - **CRITICAL: All keys in `animation_marks` must use camelCase naming (e.g., "cardDrop", "stampSlap"), NOT snake_case (e.g., "card_drop", "stamp_slap"). These keys will be accessed as JavaScript object properties in the generated code.**
   - Newer/revealed-later information should be visually above older information, and the `visual_design` should say so when layering matters.
 
   ## 输出规范

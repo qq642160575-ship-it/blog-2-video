@@ -4,6 +4,7 @@ import { SourceInput } from './SourceInput';
 import { Timeline } from './Timeline';
 import { ScriptEditor } from './ScriptEditor';
 import { WorkflowStatus } from './WorkflowStatus';
+import { ArtifactTabs } from './ArtifactTabs';
 import { useIdeStore } from '../../store/useIdeStore';
 
 export const LeftPanel: React.FC = () => {
@@ -23,6 +24,7 @@ export const LeftPanel: React.FC = () => {
       <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-hidden p-4">
         <WorkflowStatus />
         <SourceInput />
+        <ArtifactTabs />
         <Timeline />
       </div>
 

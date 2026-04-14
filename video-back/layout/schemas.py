@@ -60,6 +60,7 @@ class SceneLayoutSpec(BaseModel):
     scene_id: str
     canvas: CanvasSpec = Field(default_factory=CanvasSpec)
     elements: list[LayoutElement]
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def ensure_unique_ids(self) -> "SceneLayoutSpec":

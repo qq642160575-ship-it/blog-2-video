@@ -12,21 +12,21 @@ example = """
     {
       "scene_id": "Scene 1",
       "script": "做 AI Agent 最痛苦的事，就是明明看了很多教程，最后还是做不对。",
-      "visual_design": "暖米色网格画布中心，一个 LogicCard 贴纸弹跳进场，上方斜贴一个黄色 Stamp 标注‘PAIN POINT’。右侧预留出 FlowNode 准备空间。",
+      "visual_design": "暖米色网格画布中心，一个 LogicCard 贴纸弹跳进场，上方斜贴一个黄色 Stamp 标注'PAIN POINT'。右侧预留出 FlowNode 准备空间。",
       "camera_language": "固定视角，准备向右平移",
       "visual_elements": "LogicCard(中心)/Stamp(右偏转)/米色坐标纸底纹",
-      "visual_transition": "LogicCard 以弹簧效果(Spring)垂直落下，Stamp 随后以 12 度倾向‘拍’在它右角。",
+      "visual_transition": "LogicCard 以弹簧效果(Spring)垂直落下，Stamp 随后以 12 度倾向'拍'在它右角。",
       "emotion_rhythm": "沮丧（强度 0.8）",
       "code_render_model": "AbsoluteFill + GridPattern。LogicCard 使用 border: 4px solid #000 且带 rotate: -2deg。Stamp 使用 scale 动画进场。",
       "duration": 4.5,
       "animation_marks": {
-        "card_drop": 10,
-        "stamp_slap": 45
+        "cardDrop": 10,
+        "stampSlap": 45
       }
     }
   ],
   "validation": {
-    "semantic_coverage": "完美复现了对于‘痛苦’的物理具象化表达",
+    "semantic_coverage": "完美复现了对于'痛苦'的物理具象化表达",
     "visual_feasibility": "贴纸与物理弹簧动效是 Vizplainer 风格的核心，纯代码实现极稳",
     "platform_adaptability": "画布风格具有极强的视觉连续性，适合长频讲解",
     "narrative_continuity": "为下一镜头的画布平移做好了空间布局预留",

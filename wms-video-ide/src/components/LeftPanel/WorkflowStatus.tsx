@@ -14,6 +14,8 @@ const formatSeconds = (seconds: number | null | undefined): string => {
 export const WorkflowStatus: React.FC = () => {
   const rewriteStatus = useIdeStore((s) => s.rewriteStatus);
   const aiStatus = useIdeStore((s) => s.aiStatus);
+  const activeAnimationTaskId = useIdeStore((s) => s.activeAnimationTaskId);
+  const activeAnimationTaskStatus = useIdeStore((s) => s.activeAnimationTaskStatus);
   const oralScript = useIdeStore((s) => s.oralScript);
   const scenes = useIdeStore((s) => s.scenes);
   const processStartTime = useIdeStore((s) => s.processStartTime);
@@ -64,6 +66,14 @@ export const WorkflowStatus: React.FC = () => {
     const elapsed = progress.elapsedSeconds || liveElapsed;
     const eta = progress.etaSeconds ?? progress.estimatedTotalSeconds;
     detailLine = `已运行 ${formatSeconds(elapsed)}，预计剩余 ${formatSeconds(eta)}`;
+  } else if (activeAnimationTaskStatus === 'queued') {
+    tone = 'text-indigo-100 border-indigo-500/40 bg-indigo-500/10';
+    title = '任务已入队，等待执行';
+    description = '后端已创建视频任务，正在等待 worker 开始处理。';
+    icon = <Clock3 className="h-4 w-4 text-indigo-300" />;
+    progressLabel = '队列中';
+    percent = 2;
+    detailLine = activeAnimationTaskId ? `任务 ID ${activeAnimationTaskId}` : null;
   } else if (rewriteStatus === 'error' || aiStatus === 'error') {
     const errorProgress = rewriteStatus === 'error'
       ? workflowProgressByName.conversational_tone
@@ -74,6 +84,17 @@ export const WorkflowStatus: React.FC = () => {
     icon = <AlertCircle className="h-4 w-4 text-red-300" />;
     progressLabel = `${errorProgress.completedCount} / ${errorProgress.totalCount}`;
     percent = errorProgress.percent;
+    if (activeAnimationTaskStatus === 'failed') {
+      detailLine = activeAnimationTaskId ? `失败任务 ${activeAnimationTaskId}` : detailLine;
+    }
+  } else if (activeAnimationTaskStatus === 'cancelled') {
+    tone = 'text-slate-200 border-slate-500/40 bg-slate-500/10';
+    title = '任务已取消';
+    description = '当前视频任务已被取消，可以重新发起生成。';
+    icon = <AlertCircle className="h-4 w-4 text-slate-300" />;
+    progressLabel = '已取消';
+    percent = 0;
+    detailLine = activeAnimationTaskId ? `任务 ID ${activeAnimationTaskId}` : null;
   } else if (scenes.length > 0) {
     tone = 'text-emerald-100 border-emerald-500/40 bg-emerald-500/10';
     title = '分镜、预览和代码已完成';
@@ -81,6 +102,7 @@ export const WorkflowStatus: React.FC = () => {
     icon = <CheckCircle2 className="h-4 w-4 text-emerald-300" />;
     progressLabel = '2 / 2';
     percent = 100;
+    detailLine = activeAnimationTaskId ? `任务 ID ${activeAnimationTaskId}` : null;
   } else if (oralScript.trim()) {
     tone = 'text-amber-100 border-amber-500/40 bg-amber-500/10';
     title = '口播稿已完成';

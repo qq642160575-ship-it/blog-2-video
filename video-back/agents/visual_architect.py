@@ -111,9 +111,12 @@ class VisualProtocol(BaseModel):
         flattened: Dict[str, int] = {}
         for key, frame in value.items():
             if isinstance(frame, dict):
+                # 嵌套字典：将嵌套的键名转换为驼峰命名
                 for nested_key, nested_frame in frame.items():
                     if isinstance(nested_frame, (int, float)):
-                        flattened[f"{key}_{nested_key}"] = int(nested_frame)
+                        # 将 nested_key 首字母大写后拼接，保持驼峰命名
+                        camel_key = key + nested_key[0].upper() + nested_key[1:] if nested_key else key
+                        flattened[camel_key] = int(nested_frame)
                 continue
             if isinstance(frame, (int, float)):
                 flattened[str(key)] = int(frame)
